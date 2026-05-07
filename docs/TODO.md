@@ -136,6 +136,47 @@ Model on device: `/home/ubuntu/ai_in_a_box/downloaded/en_US-lessac-low.onnx` (61
 - [ ] Mute mic during playback (feedback suppression)
 - [ ] Configure PulseAudio devices (mirror configure_devices.sh)
 
+## Demo Recording
+
+Capture TUI screen + audio (TTS output / mic input) for project demos.
+
+### Tools
+
+| Tool | Purpose | Output |
+|------|---------|--------|
+| [VHS](https://github.com/charmbracelet/vhs) | Scripted terminal recording via `.tape` files | GIF, MP4, WebM |
+| [asciinema](https://asciinema.org/) | Terminal session recorder (Rust-based v3) | `.cast` files |
+| [agg](https://github.com/asciinema/agg) | Convert `.cast` -> optimized GIF (gifski) | GIF |
+
+### Recommended approach
+
+1. **TUI screen**: Use **VHS** with a `.tape` script — supports interactive
+   TUI apps (arrow keys, timing, Wait for render). Produces GIF/MP4 for
+   GitHub README. Scriptable and reproducible.
+
+2. **Audio capture**: VHS/asciinema capture terminal output only, not audio.
+   For audio, record separately with `arecord` (ALSA) or `ffmpeg` and sync
+   in post with video editing. Or use `ffmpeg` to capture both screen
+   (framebuffer) and audio simultaneously:
+   ```bash
+   ffmpeg -f fbdev -i /dev/fb0 -f alsa -i hw:2,0 -t 60 demo.mp4
+   ```
+
+3. **Combined demo**: Record TUI via VHS (`.tape` -> MP4), record audio via
+   ALSA (`arecord -D hw:2,0 -f cd -d 60 audio.wav`), merge with ffmpeg:
+   ```bash
+   ffmpeg -i tui.mp4 -i audio.wav -c:v copy -c:a aac demo.mp4
+   ```
+
+### TODO
+
+- [ ] Install VHS on Rock (`go install github.com/charmbracelet/vhs@latest` or binary)
+- [ ] Create `.tape` script for meditation demo flow
+- [ ] Test framebuffer capture with `ffmpeg -f fbdev`
+- [ ] Test audio capture from Uctronics speaker (card 2)
+- [ ] Produce first demo GIF for README
+- [ ] Produce first demo MP4 with audio for project showcase
+
 ## Phase 4: Hardware Integration (future)
 
 - [ ] Slint graphical display (DRM/KMS, no GPU)
