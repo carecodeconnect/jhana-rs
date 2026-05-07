@@ -122,6 +122,11 @@ generate, but TTS playback + pauses of the previous sentences may take
 20-30s. So Ministral 3B may be **fast enough in practice** despite the
 raw benchmark number. Needs end-to-end pipeline testing to confirm.
 
+Additional consideration: Mistral/Ministral models are developed by
+Mistral AI (Paris, France) — an EU-based company. For sovereign,
+locally-hosted AI in the EU, this is a strong choice. The model runs
+entirely on-device with no internet connection required.
+
 ### Analysis so far
 
 llama-cpp-2 is 23x faster than llama-gguf on this hardware due to
