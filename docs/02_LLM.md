@@ -90,8 +90,15 @@ All tests use:
 
 | Engine | tok/s | First token | Model load | Quality | Status |
 |--------|-------|-------------|------------|---------|--------|
-| **llama-cpp-2** | **10.8** | 2ms | 0.84s | **Excellent** | **WINNER** |
+| **llama-cpp-2** | **10.8** | 2ms | 0.84s | **Excellent** | Tested |
 | Candle v0.10.2 | — | — | 0.43s | — | Unsupported arch |
+
+#### SmolLM2-1.7B-Instruct Q4_K_M (1.0 GB, Candle-compatible)
+
+| Engine | tok/s | First token | Model load | Quality | Status |
+|--------|-------|-------------|------------|---------|--------|
+| **llama-cpp-2** | **11.8** | 1ms | 1.61s | Good | Tested |
+| **Candle v0.10.2** | **8.72** | — | 0.14s | Good | Tested, NEON works |
 
 ### Analysis so far
 
@@ -118,9 +125,19 @@ Supported models via `--which`: 7b, 13b, 70b, 7b-chat, 13b-chat, 70b-chat,
 7b-open-chat-3.5, 7b-starling-a, mixtral, mixtral-instruct, llama3-8b,
 phi3, **SmoLM2-360M-Instruct**, **SmoLM2-1.7B-Instruct**, deepseekr1-llama8b.
 
-SmolLM2-1.7B-Instruct (~1.06 GB Q4_K_M) is the only Candle-supported model
-small enough for the Rock 5A. Testing this next to give Candle a fair shot
-with a compatible model.
+SmolLM2-1.7B-Instruct Q4_K_M (1.0 GB) tested — Candle achieves **8.72
+tok/s** with NEON intrinsics working. llama-cpp-2 gets 11.8 tok/s on the
+same model (35% faster).
+
+### Summary: two viable options
+
+| Option | Engine | Model | tok/s | Pros | Cons |
+|--------|--------|-------|-------|------|------|
+| **A** | llama-cpp-2 | Qwen3-1.7B | 10.8 | Best model quality, broad arch support | C++ build deps |
+| **B** | llama-cpp-2 | SmolLM2-1.7B | 11.8 | Fastest raw speed | Less capable model |
+| **C** | Candle | SmolLM2-1.7B | 8.72 | Pure Rust, 0.14s load, no C++ | Limited arch support, 35% slower |
+
+All three exceed the 2.5 tok/s target by 3-4x.
 
 ### Pure Rust engines ruled out
 
