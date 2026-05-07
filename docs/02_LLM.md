@@ -76,13 +76,22 @@ All tests use:
 
 ### Results
 
-| Engine | tok/s | First token | Model load | Quality | Build deps | Status |
-|--------|-------|-------------|------------|---------|------------|--------|
-| **llama-cpp-2** | **5.8** | 1ms | 23.85s | Good | cmake, libclang-dev | **Tested** |
-| llama-gguf v0.14 | ~0.25 | — | 1.46s | Poor | protobuf-compiler | Tested |
-| OxiLLaMa v0.1.3 | **CRASH** | — | 0.01s | — | None | OOM: 13.3 GB alloc on 8 GB |
-| OxiBonsai | **SKIP** | — | — | — | None | Q1_0 only — no Q4_0 support |
-| Candle v0.10.2 | **3.03** | — | 0.09s | Gibberish | libssl-dev | NEON works, model compat issue |
+#### Orca Mini 3B Q4_0 (1.9 GB, old model)
+
+| Engine | tok/s | First token | Model load | Quality | Status |
+|--------|-------|-------------|------------|---------|--------|
+| **llama-cpp-2** | **5.8** | 1ms | 23.85s | Good | Tested |
+| llama-gguf v0.14 | ~0.25 | — | 1.46s | Poor | 23x slower |
+| OxiLLaMa v0.1.3 | CRASH | — | — | — | OOM 13.3 GB |
+| OxiBonsai | SKIP | — | — | — | Q1_0 only |
+| Candle v0.10.2 | 3.03 | — | 0.09s | Gibberish | Model compat |
+
+#### Qwen3-1.7B Q4_K_M (1.1 GB, modern model)
+
+| Engine | tok/s | First token | Model load | Quality | Status |
+|--------|-------|-------------|------------|---------|--------|
+| **llama-cpp-2** | **10.8** | 2ms | 0.84s | **Excellent** | **WINNER** |
+| Candle v0.10.2 | — | — | 0.43s | — | Unsupported arch |
 
 ### Analysis so far
 
@@ -91,14 +100,33 @@ hand-tuned ARM NEON SIMD in the C++ llama.cpp library. The llama-gguf
 output quality difference (academic vs meditation text) is likely due
 to sampler implementation, not the model.
 
-Key question for remaining candidates: do any pure Rust engines match
-llama.cpp's ARM NEON performance? OxiLLaMa and OxiBonsai claim NEON
-support via Rust intrinsics — need to verify on this hardware.
+### Leading candidate: llama-cpp-2 + Qwen3-1.7B
 
-**OxiLLaMa (v0.1.3) crashed immediately** — tried to allocate 13.3 GB for
-a 1.9 GB model on 8 GB hardware. Does not use mmap like llama.cpp. This
-is a disqualifying issue for memory-constrained devices. Installed as
-release build via `cargo install oxillama-cli`.
+**llama-cpp-2 with Qwen3-1.7B Q4_K_M is the current best:**
+- 10.8 tok/s (4x the 2.5 target, 2x Orca)
+- 0.84s model load (vs 23.85s for Orca)
+- 1.05 GB model RAM + 224 MB KV cache (~1.3 GB total)
+- Excellent meditation output quality out of the box
+- Smaller model leaves more RAM for TTS/STT later
+
+### Remaining test: Candle + SmolLM2-1.7B-Instruct
+
+Candle's quantized example only supports specific architectures (not Qwen3).
+Supported models via `--which`: 7b, 13b, 70b, 7b-chat, 13b-chat, 70b-chat,
+7b-code, 13b-code, 32b-code, 7b-leo, 13b-leo, 7b-mistral,
+7b-mistral-instruct, 7b-mistral-instruct-v0.2, 7b-zephyr-a, 7b-zephyr-b,
+7b-open-chat-3.5, 7b-starling-a, mixtral, mixtral-instruct, llama3-8b,
+phi3, **SmoLM2-360M-Instruct**, **SmoLM2-1.7B-Instruct**, deepseekr1-llama8b.
+
+SmolLM2-1.7B-Instruct (~1.06 GB Q4_K_M) is the only Candle-supported model
+small enough for the Rock 5A. Testing this next to give Candle a fair shot
+with a compatible model.
+
+### Pure Rust engines ruled out
+
+- **llama-gguf**: 23x slower than llama-cpp-2 (no effective ARM NEON)
+- **OxiLLaMa**: OOM crash (no mmap, tried 13.3 GB on 8 GB device)
+- **OxiBonsai**: Q1_0 only, doesn't support Q4_0/Q4_K_M
 
 ---
 
