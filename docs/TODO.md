@@ -55,7 +55,8 @@ Model on device needs replacing: GGML v3 format is deprecated, must use GGUF.
 - [x] Build llama-gguf on Rock (pure Rust — needs protobuf-compiler)
 - [x] Download Orca Mini 3B GGUF (1.9 GB) to Rock
 - [x] Benchmark llama-cpp-2: **5.8 tok/s** on Orca Mini 3B Q4_0 (target was >2.5)
-- [ ] Benchmark llama-gguf on same model for comparison
+- [x] Benchmark llama-gguf: **~0.25 tok/s** — 23x slower, no ARM NEON
+- [x] Decision: **use llama-cpp-2** for inference on Rock 5A
 - [ ] Download Orca Mini 3B GGUF (~2 GB) to replace old GGML v3 model
 - [ ] Load GGUF model on Rock, verify it loads
 - [ ] Configure inference params (top_k=40, top_p=0.95, temp=0.25, repeat_penalty=1.1)

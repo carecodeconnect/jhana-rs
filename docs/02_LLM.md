@@ -75,6 +75,27 @@ prompt — it's not fine-tuned for that. Options:
 2. Use a better instruction-following model (Qwen3-4B, Llama 3.2 3B)
 3. Fine-tune a small model with pause markers (like jhana-mistral)
 
+### Head-to-head: llama-cpp-2 vs llama-gguf (2026-05-07)
+
+Same model (Orca Mini 3B Q4_0 GGUF), same prompt, 100 token limit.
+
+| Metric | llama-cpp-2 (C++) | llama-gguf (pure Rust) |
+|--------|-------------------|------------------------|
+| **Tokens/sec** | **5.8** | **~0.25** |
+| Model load time | 23.85s | 1.46s |
+| Output quality | Meditation text (on-topic) | Academic text (off-topic) |
+| ARM NEON SIMD | Yes (hand-tuned asm) | No |
+
+**Decision: use llama-cpp-2.** The 23x inference speed advantage is
+decisive. llama-gguf's faster model load (16x) doesn't compensate —
+generation speed is what matters for real-time streaming to TTS.
+
+The llama-gguf output quality difference is likely due to sampler
+implementation differences, not the model itself. But inference speed
+alone disqualifies it on this hardware.
+
+llama-gguf may become viable if/when it adds ARM NEON SIMD support.
+
 ---
 
 ## Test Plan
