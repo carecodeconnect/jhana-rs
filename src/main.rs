@@ -10,13 +10,13 @@
 //! Hardware buttons: BACK=quit, ENTER=start, UP/DOWN=scroll.
 
 mod gpio;
-#[allow(dead_code)] // LLM module not yet wired to main — used in tests
 mod llm;
 mod ui;
 
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
@@ -29,7 +29,11 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use simplelog::{Config, LevelFilter, WriteLogger};
 
 use crate::gpio::ButtonEvent;
+use crate::llm::LlmOutput;
 use crate::ui::{App, AppState, render};
+
+/// Default meditation type loaded on startup.
+const DEFAULT_MEDITATION: &str = "test";
 
 fn main() -> io::Result<()> {
     // File logger — all output goes to jhana-rs.log, not stdout/tty
@@ -47,6 +51,9 @@ fn main() -> io::Result<()> {
         info!("GPIO buttons not available (keyboard only)");
     }
 
+    // LLM output channel — background streaming thread sends here
+    let (llm_tx, llm_rx) = mpsc::channel::<LlmOutput>();
+
     // Signal handling — SIGTERM/SIGINT set this flag to quit the event loop
     let quit = Arc::new(AtomicBool::new(false));
     let quit_signal = Arc::clone(&quit);
@@ -63,25 +70,15 @@ fn main() -> io::Result<()> {
 
     let mut app = App::new();
 
-    // Demo text — loaded hidden, revealed sentence-by-sentence when
-    // the user presses ENTER/→. Simulates the LLM streaming flow.
-    let demo_lines = [
-        "Close your eyes and take a deep breath in.",
-        "",
-        "[pause 5s]",
-        "",
-        "Now slowly exhale, releasing any tension you feel.",
-        "",
-        "[pause 3s]",
-        "",
-        "Let your shoulders drop.",
-    ];
-    for line in &demo_lines {
-        app.push_hidden((*line).to_string());
-    }
-
     // Main event loop
-    let result = run_loop(&mut terminal, &mut app, &quit, button_rx.as_ref());
+    let result = run_loop(
+        &mut terminal,
+        &mut app,
+        &quit,
+        button_rx.as_ref(),
+        &llm_tx,
+        &llm_rx,
+    );
 
     // Cleanup — always restore terminal state
     disable_raw_mode()?;
@@ -99,12 +96,15 @@ fn main() -> io::Result<()> {
     result
 }
 
-/// Event loop that checks for key presses, GPIO buttons, and the quit signal.
+/// Event loop that checks for key presses, GPIO buttons, LLM output, and
+/// the quit signal.
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     quit: &AtomicBool,
-    button_rx: Option<&std::sync::mpsc::Receiver<ButtonEvent>>,
+    button_rx: Option<&mpsc::Receiver<ButtonEvent>>,
+    llm_tx: &mpsc::Sender<LlmOutput>,
+    llm_rx: &mpsc::Receiver<LlmOutput>,
 ) -> io::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, app))?;
@@ -123,7 +123,31 @@ fn run_loop(
                     ButtonEvent::Back => return Ok(()),
                     ButtonEvent::Up => app.scroll_up(),
                     ButtonEvent::Down => app.scroll_down(),
-                    ButtonEvent::Enter => handle_start(app),
+                    ButtonEvent::Enter => handle_start(app, llm_tx),
+                }
+            }
+        }
+
+        // Drain LLM output channel (non-blocking)
+        while let Ok(output) = llm_rx.try_recv() {
+            match output {
+                LlmOutput::Sentence(s) => {
+                    info!("sentence: {s}");
+                    app.token_count += estimate_tokens(&s);
+                    app.push_sentence(s);
+                }
+                LlmOutput::Pause(n) => {
+                    info!("pause: {n:.0}s");
+                    app.push_sentence(format!("[pause {n:.0}s]"));
+                }
+                LlmOutput::Done => {
+                    app.finish();
+                    info!("generation complete, {} tokens", app.token_count);
+                }
+                LlmOutput::Error(e) => {
+                    error!("LLM error: {e}");
+                    app.push_sentence(format!("Error: {e}"));
+                    app.finish();
                 }
             }
         }
@@ -140,21 +164,10 @@ fn run_loop(
                 }
                 KeyCode::Up => app.scroll_up(),
                 KeyCode::Down => app.scroll_down(),
-                KeyCode::Enter => handle_start(app),
+                KeyCode::Enter => handle_start(app, llm_tx),
                 other => {
                     info!("key: {other:?}");
                 }
-            }
-        }
-
-        // Demo: auto-reveal next line every 500ms while generating
-        if app.state == AppState::Generating {
-            if app.reveal_next() {
-                app.token_count += 8; // simulated tokens per sentence
-                info!("revealed line (demo), tokens={}", app.token_count);
-            } else {
-                app.finish();
-                info!("demo generation complete");
             }
         }
     }
@@ -164,38 +177,43 @@ fn run_loop(
 
 /// Handle START/ENTER action based on current state.
 ///
-/// - Idle: begin generating (sentence-by-sentence reveal in demo mode)
+/// - Idle: load prompts and start LLM streaming
 /// - Done: reset and return to idle for another session
 /// - Generating/Paused: ignored (generation is already in progress)
-fn handle_start(app: &mut App) {
+fn handle_start(app: &mut App, llm_tx: &mpsc::Sender<LlmOutput>) {
     match app.state {
         AppState::Idle => {
-            info!("starting demo generation");
-            app.start_generating();
+            info!("starting meditation: {DEFAULT_MEDITATION}");
+            match llm::load_prompts(DEFAULT_MEDITATION) {
+                Ok((system, user)) => {
+                    app.start_generating();
+                    llm::start_streaming(llm_tx.clone(), system, user);
+                }
+                Err(e) => {
+                    error!("Failed to load prompts: {e}");
+                    app.push_sentence(format!("Error: {e}"));
+                }
+            }
         }
         AppState::Done => {
             info!("resetting to idle");
             app.reset();
-            // Re-load demo text
-            let demo_lines = [
-                "Close your eyes and take a deep breath in.",
-                "",
-                "[pause 5s]",
-                "",
-                "Now slowly exhale, releasing any tension you feel.",
-                "",
-                "[pause 3s]",
-                "",
-                "Let your shoulders drop.",
-            ];
-            for line in &demo_lines {
-                app.push_hidden((*line).to_string());
-            }
         }
         AppState::Generating | AppState::Paused => {
             info!("start pressed during generation — ignored");
         }
     }
+}
+
+/// Estimate token count from text length (rough heuristic for TUI display).
+///
+/// Uses ~4 characters per token (GPT-style average). This is only for the
+/// live speed display in the footer — exact counts aren't needed since the
+/// actual SSE stream delivers one token per `data:` event.
+fn estimate_tokens(text: &str) -> u32 {
+    #[expect(clippy::cast_possible_truncation)]
+    let estimate = (text.len() as u32 / 4).max(1);
+    estimate
 }
 
 /// Register SIGTERM/SIGINT handler that sets the quit flag.

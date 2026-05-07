@@ -1,21 +1,45 @@
-//! LLM integration via llama-cpp-2 (llama.cpp Rust bindings).
+//! LLM integration via mistral.rs OpenAI-compatible HTTP API.
 //!
-//! Wraps llama.cpp for on-device inference of GGUF models. llama-cpp-2 was
-//! chosen over pure-Rust alternatives because llama.cpp has proven ARM NEON
-//! SIMD optimizations and broad model support (Llama, Mistral, Qwen, etc.).
+//! Connects to a local mistral.rs server (default `localhost:8321`) running
+//! Ministral 3B. Uses streaming Server-Sent Events (SSE) to receive tokens
+//! in real time, parses them through [`ChunkParser`] to split into sentences
+//! and pause markers, and sends [`LlmOutput`] events through an mpsc channel
+//! to the main TUI event loop.
 //!
-//! # Model format
+//! # Prompt loading
 //!
-//! All models must be in **GGUF** format. The original Orca Mini 3B on the
-//! device is GGML v3 (`.ggmlv3.q4_0.bin`) which is no longer supported by
-//! modern llama.cpp. A GGUF version must be downloaded to replace it.
+//! Prompts are loaded from the `prompts/` directory at runtime:
+//! - `prompts/system.txt` — system prompt (meditation guide persona)
+//! - `prompts/meditations/{type}.txt` — meditation-specific few-shot example
 //!
 //! # Pause marker parsing
 //!
 //! The LLM is prompted to emit `[N]` markers (e.g. `[5]`, `[3.5]`) inline
-//! with meditation text. A bracket state machine (ported from the Python
-//! `jhana-dev/src/meditation_guide.py`) splits streaming tokens into
-//! sentences and pause durations.
+//! with meditation text. A bracket state machine splits streaming tokens
+//! into sentences and pause durations.
+
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
+use std::sync::mpsc::Sender;
+use std::time::Duration;
+
+use log::{error, info};
+
+/// mistral.rs server address (host:port).
+const SERVER_ADDR: &str = "127.0.0.1:8321";
+
+/// API endpoint path.
+const API_PATH: &str = "/v1/chat/completions";
+
+/// TCP connect timeout in seconds.
+const CONNECT_TIMEOUT: u64 = 10;
+
+/// Read timeout in seconds — long because Ministral 3B generates slowly
+/// (~3.89 tok/s) and the first token may take time if the model is loading.
+const READ_TIMEOUT: u64 = 300;
+
+/// Maximum tokens to generate per meditation.
+const MAX_TOKENS: u32 = 1024;
 
 /// Output from the LLM streaming pipeline.
 ///
@@ -30,6 +54,8 @@ pub enum LlmOutput {
     Pause(f32),
     /// The LLM has finished generating.
     Done,
+    /// An error occurred during streaming.
+    Error(String),
 }
 
 /// Parse streaming text chunks into sentences and pause markers.
@@ -116,6 +142,232 @@ impl ChunkParser {
     }
 }
 
+/// Load the system prompt and a meditation-specific user prompt from disk.
+///
+/// Reads `prompts/system.txt` and `prompts/meditations/{meditation_type}.txt`
+/// relative to the current working directory. Returns `(system, user)` prompts.
+///
+/// Prompts are loaded from files rather than compiled into the binary so that
+/// they can be edited on-device without rebuilding. Each meditation type
+/// (flower garden, lotus flower, etc.) has its own file containing a cleaned
+/// few-shot example with `[N]` pause markers and a user instruction.
+pub fn load_prompts(meditation_type: &str) -> Result<(String, String), String> {
+    let system = std::fs::read_to_string("prompts/system.txt")
+        .map_err(|e| format!("Failed to read prompts/system.txt: {e}"))?;
+    let user_path = format!("prompts/meditations/{meditation_type}.txt");
+    let user = std::fs::read_to_string(&user_path)
+        .map_err(|e| format!("Failed to read {user_path}: {e}"))?;
+    Ok((system, user))
+}
+
+/// List available meditation types by scanning the prompts/meditations/ directory.
+#[expect(dead_code)] // will be used when meditation selection menu is added
+pub fn list_meditations() -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir("prompts/meditations") else {
+        return Vec::new();
+    };
+    let mut types: Vec<String> = entries
+        .filter_map(|e| {
+            let name = e.ok()?.file_name().into_string().ok()?;
+            name.strip_suffix(".txt").map(String::from)
+        })
+        .collect();
+    types.sort();
+    types
+}
+
+/// Spawn a background thread that streams a meditation from the mistral.rs server.
+///
+/// Sends [`LlmOutput`] events through `tx`. The thread connects to the
+/// local mistral.rs server, sends the system and user prompts with streaming
+/// enabled, parses the SSE response, and feeds tokens through [`ChunkParser`].
+///
+/// Uses the same pattern as GPIO button polling: a background `std::thread`
+/// with `std::sync::mpsc` channel. No async runtime is needed, which keeps
+/// the main event loop simple and avoids tokio as a dependency on aarch64.
+///
+/// If the connection fails or an error occurs mid-stream, sends
+/// [`LlmOutput::Error`] and exits. If the receiver is dropped (TUI quit),
+/// the thread detects the closed channel and exits cleanly.
+pub fn start_streaming(tx: Sender<LlmOutput>, system: String, user: String) {
+    std::thread::Builder::new()
+        .name("llm-stream".into())
+        .spawn(move || {
+            info!("LLM streaming thread started");
+            if let Err(e) = stream_meditation(&tx, &system, &user) {
+                error!("LLM streaming error: {e}");
+                let _ = tx.send(LlmOutput::Error(e));
+            }
+        })
+        .expect("failed to spawn LLM thread");
+}
+
+/// Perform the HTTP request and stream the response.
+///
+/// Uses raw `TcpStream` instead of an HTTP client crate because SSE
+/// streaming over localhost doesn't need TLS, and HTTP client crates
+/// (minreq, ureq) often buffer chunked responses rather than streaming
+/// them line-by-line. Raw TCP gives us immediate access to each SSE
+/// event as it arrives from mistral.rs.
+fn stream_meditation(tx: &Sender<LlmOutput>, system: &str, user: &str) -> Result<(), String> {
+    let body = serde_json::json!({
+        "model": "default",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ],
+        "stream": true,
+        "temperature": 0.7,
+        "max_tokens": MAX_TOKENS
+    });
+
+    let body_str = body.to_string();
+    info!("POST {SERVER_ADDR}{API_PATH} (stream=true, max_tokens={MAX_TOKENS})");
+
+    // Connect with timeout
+    let mut stream = TcpStream::connect_timeout(
+        &SERVER_ADDR
+            .parse()
+            .map_err(|e| format!("Bad address: {e}"))?,
+        Duration::from_secs(CONNECT_TIMEOUT),
+    )
+    .map_err(|e| format!("Connection failed (is mistralrs-server running?): {e}"))?;
+
+    stream
+        .set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT)))
+        .map_err(|e| format!("Failed to set read timeout: {e}"))?;
+
+    // Send HTTP/1.1 request. The server may respond with chunked transfer
+    // encoding, which interleaves hex chunk-size lines with the SSE data.
+    // The SSE parser skips non-`data:` lines, which naturally ignores the
+    // chunk framing. We strip chunk size lines explicitly for clarity.
+    let request = format!(
+        "POST {API_PATH} HTTP/1.1\r\n\
+         Host: {SERVER_ADDR}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Accept: text/event-stream\r\n\
+         \r\n\
+         {body_str}",
+        body_str.len()
+    );
+
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| format!("Failed to send request: {e}"))?;
+
+    // Read response — skip HTTP headers, then parse SSE body
+    let reader = BufReader::new(stream);
+    let mut lines = reader.lines();
+
+    // Read status line
+    let status_line = lines
+        .next()
+        .ok_or("No response from server")?
+        .map_err(|e| format!("Failed to read status: {e}"))?;
+
+    if !status_line.contains("200") {
+        return Err(format!("Server returned: {status_line}"));
+    }
+
+    // Skip response headers (read until empty line)
+    for line_result in lines.by_ref() {
+        let line = line_result.map_err(|e| format!("Header read error: {e}"))?;
+        if line.is_empty() {
+            break;
+        }
+    }
+
+    // Now parse the SSE body
+    parse_sse_stream(lines, tx)
+}
+
+/// Parse an SSE stream and send `LlmOutput` events.
+///
+/// Accepts an iterator of line results for flexibility: the live code passes
+/// `BufReader::lines()` from a `TcpStream`, while tests pass lines from a
+/// `Cursor<&[u8]>`. This decoupling lets us test SSE parsing without a
+/// network connection.
+fn parse_sse_stream(
+    lines: impl Iterator<Item = std::io::Result<String>>,
+    tx: &Sender<LlmOutput>,
+) -> Result<(), String> {
+    let mut parser = ChunkParser::new();
+    let mut token_count: u32 = 0;
+
+    for line_result in lines {
+        let line = line_result.map_err(|e| format!("Stream read error: {e}"))?;
+
+        // SSE format: empty lines are event separators, skip them
+        if line.is_empty() {
+            continue;
+        }
+
+        // Skip SSE comments
+        if line.starts_with(':') {
+            continue;
+        }
+
+        // Extract data payload — also skip chunked encoding size lines
+        // (hex numbers like "4e", "0") which don't start with "data: "
+        let Some(data) = line.strip_prefix("data: ") else {
+            log::debug!("skip non-data line: {}", &line[..line.len().min(60)]);
+            continue;
+        };
+
+        // End of stream signal
+        if data == "[DONE]" {
+            info!("SSE stream done, {token_count} tokens received");
+            for output in parser.flush() {
+                let _ = tx.send(output);
+            }
+            return Ok(());
+        }
+
+        // Parse JSON payload
+        let json: serde_json::Value =
+            serde_json::from_str(data).map_err(|e| format!("JSON parse error: {e}"))?;
+
+        // Check for finish_reason
+        if let Some(reason) = json["choices"][0]["finish_reason"].as_str()
+            && (reason == "stop" || reason == "length")
+        {
+            info!("Finish reason: {reason}, {token_count} tokens");
+            for output in parser.flush() {
+                let _ = tx.send(output);
+            }
+            return Ok(());
+        }
+
+        // Extract content delta
+        let Some(content) = json["choices"][0]["delta"]["content"].as_str() else {
+            continue;
+        };
+
+        if content.is_empty() {
+            continue;
+        }
+
+        token_count += 1;
+
+        // Feed through ChunkParser
+        for output in parser.feed(content) {
+            if tx.send(output).is_err() {
+                // Receiver dropped (TUI quit) — exit cleanly
+                info!("Channel closed, stopping stream");
+                return Ok(());
+            }
+        }
+    }
+
+    // Stream ended without [DONE] — flush remaining
+    info!("Stream EOF, {token_count} tokens received");
+    for output in parser.flush() {
+        let _ = tx.send(output);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +433,53 @@ mod tests {
         parser.feed("Start.");
         let outputs = parser.feed(" [3.5] ");
         assert_eq!(outputs, vec![LlmOutput::Pause(3.5)]);
+    }
+
+    #[test]
+    fn parse_sse_stream_basic() {
+        let sse_data = "\
+data: {\"choices\":[{\"delta\":{\"content\":\"Hello.\"}}]}\n\
+\n\
+data: {\"choices\":[{\"delta\":{\"content\":\" [5] \"}}]}\n\
+\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"World.\"}}]}\n\
+\n\
+data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{\"content\":\"\"}}]}\n\
+\n\
+data: [DONE]\n";
+
+        let reader = BufReader::new(std::io::Cursor::new(sse_data.as_bytes()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        parse_sse_stream(reader.lines(), &tx).unwrap();
+        drop(tx);
+
+        let outputs: Vec<LlmOutput> = rx.iter().collect();
+        assert_eq!(
+            outputs,
+            vec![
+                LlmOutput::Sentence("Hello.".into()),
+                LlmOutput::Pause(5.0),
+                LlmOutput::Sentence("World.".into()),
+                LlmOutput::Done,
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_sse_stream_eof_without_done() {
+        let sse_data = "\
+data: {\"choices\":[{\"delta\":{\"content\":\"Partial text\"}}]}\n\
+\n";
+
+        let reader = BufReader::new(std::io::Cursor::new(sse_data.as_bytes()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        parse_sse_stream(reader.lines(), &tx).unwrap();
+        drop(tx);
+
+        let outputs: Vec<LlmOutput> = rx.iter().collect();
+        assert_eq!(
+            outputs,
+            vec![LlmOutput::Sentence("Partial text".into()), LlmOutput::Done,]
+        );
     }
 }

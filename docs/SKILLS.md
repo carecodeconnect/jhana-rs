@@ -84,6 +84,51 @@ sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102 \
   "tail -f /home/ubuntu/jhana-rs/jhana-rs.log"
 ```
 
+## Start mistral.rs LLM server
+
+The TUI needs mistralrs-server running on the Rock before pressing ENTER.
+Start it once — it persists until the Rock reboots or you kill it.
+
+```bash
+# SSH into Rock and start the server (takes ~40s to load model)
+sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102 \
+  "nohup /home/ubuntu/.cargo/bin/mistralrs-server --port 8321 gguf \
+    -m /home/ubuntu/models \
+    -f Ministral-3B-Instruct-Q4_K_M.gguf \
+    > /home/ubuntu/mistralrs.log 2>&1 &"
+
+# Check it's ready (wait for "listening on" message)
+sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102 \
+  "tail -5 /home/ubuntu/mistralrs.log"
+```
+
+Verify it responds:
+```bash
+sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102 \
+  "curl -s http://localhost:8321/v1/models"
+```
+
+## Test the full meditation flow
+
+1. Start mistralrs-server (see above)
+2. Sync and build:
+   ```bash
+   scripts/rock-sync.sh
+   scripts/rock-build.sh
+   ```
+3. Launch TUI on Rock display:
+   ```bash
+   scripts/rock-run.sh
+   ```
+4. Press ENTER/→ button on Rock to start meditation
+5. Watch text stream sentence-by-sentence with [N] pause markers
+6. Use UP/DOWN arrows to scroll
+7. Press BACK/← to quit
+8. View log:
+   ```bash
+   scripts/rock-log.sh
+   ```
+
 ## Restore kernel console messages
 
 ```bash

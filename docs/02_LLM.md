@@ -104,77 +104,90 @@ All tests use:
 
 | Engine | tok/s | First token | Model load | Quality | Status |
 |--------|-------|-------------|------------|---------|--------|
-| llama-cpp-2 | **1.0** | 5ms | 5.01s | **Excellent** | Tested |
+| llama-cpp-2 | 1.0 | 5ms | 5.01s | **Excellent** | Tested |
+| **mistral.rs** | **3.89** | — | ~40s | **Excellent** | **Best candidate** |
 
 Ministral 3B produced **[N] pause markers natively** without any fine-tuning
 or few-shot examples — the only model to do so. The tone and style of the
 Mistral family is an excellent fit for a meditation guide.
 
-At 1.0 tok/s, this model is below the original 2.5 tok/s target. However,
-**the meditation use case is naturally slow-paced:**
-- Pause markers (`[5]`, `[10]`) insert 5-10s of silence between sentences
-- TTS playback of each sentence takes 2-5s
-- The user is meditating, not reading — they don't see raw generation speed
-- The model only needs to stay ahead of the TTS+pause pipeline, not real-time
+**mistral.rs benchmark details (2026-05-07):**
+- Completion: **3.89 tok/s** (prompt processing: 5.62 tok/s)
+- 200 tokens generated in 63.3s (51.5s completion + 11.7s prompt)
+- Model load: ~40s (all 26 layers on CPU, F16 dtype)
+- NEON detected and active, PagedAttention disabled (CPU-only)
+- Chat template and tokenizer extracted from GGUF (no HF token needed)
+- Server: OpenAI-compatible API on port 8321
 
-A typical meditation sentence is ~15 tokens. At 1.0 tok/s that's 15s to
-generate, but TTS playback + pauses of the previous sentences may take
-20-30s. So Ministral 3B may be **fast enough in practice** despite the
-raw benchmark number. Needs end-to-end pipeline testing to confirm.
+**mistral.rs is 3.9x faster than llama-cpp-2** on the same Ministral 3B
+model. This is surprising — mistral.rs uses Candle (pure Rust) internally
+while llama-cpp-2 wraps llama.cpp (C++). The difference may be due to
+mistral.rs using F16 compute vs llama-cpp-2's dequantization path, or
+better attention implementation for the Mistral3 architecture.
+
+At 3.89 tok/s, Ministral 3B now **exceeds the 2.5 tok/s target** and is
+viable as the primary model.
 
 Additional consideration: Mistral/Ministral models are developed by
 Mistral AI (Paris, France) — an EU-based company. For sovereign,
 locally-hosted AI in the EU, this is a strong choice. The model runs
 entirely on-device with no internet connection required.
 
-### Analysis so far
+### Analysis
 
 llama-cpp-2 is 23x faster than llama-gguf on this hardware due to
 hand-tuned ARM NEON SIMD in the C++ llama.cpp library. The llama-gguf
 output quality difference (academic vs meditation text) is likely due
 to sampler implementation, not the model.
 
-### Leading candidate: llama-cpp-2 + Qwen3-1.7B
+mistral.rs (which uses Candle internally) achieves 3.89 tok/s on
+Ministral 3B vs llama-cpp-2's 1.0 tok/s on the same model — a 3.9x
+improvement. This makes the Mistral model family viable where it
+previously seemed too slow.
 
-**llama-cpp-2 with Qwen3-1.7B Q4_K_M is the current best:**
-- 10.8 tok/s (4x the 2.5 target, 2x Orca)
-- 0.84s model load (vs 23.85s for Orca)
-- 1.05 GB model RAM + 224 MB KV cache (~1.3 GB total)
-- Excellent meditation output quality out of the box
-- Smaller model leaves more RAM for TTS/STT later
+### Decision: mistral.rs + Ministral 3B (2026-05-07)
 
-### Remaining test: Candle + SmolLM2-1.7B-Instruct
+**Engine: [mistral.rs](https://github.com/EricLBuehler/mistral.rs)** (pure Rust, Candle-based)
+**Model: Ministral-3-3B-Instruct-2512 Q4_K_M** (2.0 GB, Mistral AI)
 
-Candle's quantized example only supports specific architectures (not Qwen3).
-Supported models via `--which`: 7b, 13b, 70b, 7b-chat, 13b-chat, 70b-chat,
-7b-code, 13b-code, 32b-code, 7b-leo, 13b-leo, 7b-mistral,
-7b-mistral-instruct, 7b-mistral-instruct-v0.2, 7b-zephyr-a, 7b-zephyr-b,
-7b-open-chat-3.5, 7b-starling-a, mixtral, mixtral-instruct, llama3-8b,
-phi3, **SmoLM2-360M-Instruct**, **SmoLM2-1.7B-Instruct**, deepseekr1-llama8b.
+Selected for Phase 1 implementation because:
+- 3.89 tok/s (exceeds 2.5 target)
+- Native `[N]` pause markers without fine-tuning or few-shot
+- Excellent meditation tone and style (best of all models tested)
+- Pure Rust engine (no C++ build deps)
+- OpenAI-compatible API (easy to integrate via HTTP or as library)
+- EU sovereign model (Mistral AI, Paris) — strong provider, well-funded
+- HuggingFace ecosystem (model hosting, tokenizers, community)
+- 2.0 GB model size, fits comfortably in 8 GB RAM
+- Installed on Rock as `mistralrs-server` (port 8321)
 
-SmolLM2-1.7B-Instruct Q4_K_M (1.0 GB) tested — Candle achieves **8.72
-tok/s** with NEON intrinsics working. llama-cpp-2 gets 11.8 tok/s on the
-same model (35% faster).
+**Trade-offs accepted vs Qwen3-1.7B + llama-cpp-2:**
+- Slower (3.89 vs 10.8 tok/s) but fast enough for meditation pacing
+- Larger model (2.0 vs 1.1 GB) but still within budget
+- Slower model load (~40s vs 0.84s) — acceptable for always-on device
+- Better quality output and native pause marker support compensate
 
-### Summary: two viable options
+### Summary: all viable options
 
 | Option | Engine | Model | tok/s | Pros | Cons |
 |--------|--------|-------|-------|------|------|
-| **A** | llama-cpp-2 | Qwen3-1.7B | 10.8 | Best model quality, broad arch support | C++ build deps |
-| **B** | llama-cpp-2 | SmolLM2-1.7B | 11.8 | Fastest raw speed | Less capable model |
-| **C** | Candle | SmolLM2-1.7B | 8.72 | Pure Rust, 0.14s load, no C++ | Limited arch support, 35% slower |
+| **A** | **mistral.rs** | **Ministral 3B** | **3.89** | **Best quality, native [N], pure Rust, EU** | **Slower, 40s load** |
+| B | llama-cpp-2 | Qwen3-1.7B | 10.8 | Fastest quality model, small | C++ deps, no native [N] |
+| C | llama-cpp-2 | SmolLM2-1.7B | 11.8 | Fastest raw speed | C++ deps, less capable |
+| D | Candle | SmolLM2-1.7B | 8.72 | Pure Rust, 0.14s load | Limited arch support |
 
-All three exceed the 2.5 tok/s target by 3-4x.
+All four exceed the 2.5 tok/s target.
 
-### Additional candidates (testing)
+### Alternative candidates (untested, for future reference)
 
-- **[crabml](https://github.com/crabml/crabml)**: Pure Rust, explicit
-  ARM NEON via RUSTFLAGS, GGUF support. **Failed to compile on aarch64.**
-- **[mistral.rs](https://github.com/EricLBuehler/mistral.rs)**: Fast
-  flexible inference, GGUF + many quant formats, auto-detects arch.
-  Building on Rock. Testing with Ministral 3B (smallest Mistral model).
 - **[oxide-rs](https://github.com/theawakener0/oxide-rs)**: Pure Rust,
-  CPU-focused, GGUF. To test.
+  CPU-focused, GGUF. Direct llama.cpp competitor without C++ deps.
+- **[Shimmy](https://github.com/Michael-A-Kuykendall/shimmy)**: Pure Rust,
+  OpenAI-compatible API, GGUF+SafeTensors. Native aarch64 binaries,
+  single-binary deployment, ~100ms startup. Actively maintained (v1.7.0).
+- **[small-infer](https://github.com/karthikworks/small-infer)**: ~4,500
+  lines pure Rust, ARM NEON kernels, memory-mapped GGUF for zero load
+  time. Designed for mobile/embedded. Currently Gemma3 arch only.
 
 ### Ruled out
 
@@ -183,6 +196,8 @@ All three exceed the 2.5 tok/s target by 3-4x.
 - **OxiBonsai**: Q1_0 only, doesn't support Q4_0/Q4_K_M
 - **Crane**: No clear GGUF Q4 quantization support, requires full model
   weights. Build from source only (no cargo install).
+- **[crabml](https://github.com/crabml/crabml)**: Pure Rust, explicit
+  ARM NEON via RUSTFLAGS, GGUF support. **Failed to compile on aarch64.**
 
 ---
 

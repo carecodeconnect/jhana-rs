@@ -33,32 +33,64 @@ use std::time::Instant;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-/// Retro color palette — soft phosphor greens and amber on dark background.
+/// Color theme for the TUI.
 ///
 /// RGB colors are used instead of terminal palette indices because the
 /// Rock's `TERM=linux` console supports 24-bit color via DRM/KMS, and
 /// fixed RGB values ensure consistent appearance regardless of terminal
 /// theme.
-mod palette {
-    use ratatui::style::Color;
+pub struct Theme {
+    /// Background color for all widgets.
+    pub bg: Color,
+    /// Primary accent — titles, highlights.
+    pub accent: Color,
+    /// Dim accent — secondary text, borders.
+    pub accent_dim: Color,
+    /// Title secondary — "breathe" subtitle.
+    pub title_dim: Color,
+    /// Body text — meditation sentences.
+    pub body: Color,
+    /// Pause marker styling.
+    pub pause: Color,
+    /// Status text — state label.
+    pub status: Color,
+}
 
-    /// Phosphor green — main text.
-    pub const GREEN: Color = Color::Rgb(80, 220, 120);
-    /// Dim green — secondary text, borders.
-    pub const DIM_GREEN: Color = Color::Rgb(40, 110, 60);
-    /// Amber — highlights, titles.
-    pub const AMBER: Color = Color::Rgb(255, 176, 0);
-    /// Dim amber — status text.
-    pub const DIM_AMBER: Color = Color::Rgb(160, 110, 0);
-    /// Soft white — meditation body text.
-    pub const SOFT_WHITE: Color = Color::Rgb(200, 200, 180);
-    /// Pause marker color.
-    pub const PAUSE: Color = Color::Rgb(120, 100, 180);
+impl Theme {
+    /// Light theme — white background, retro green/amber accents.
+    /// High contrast for outdoor use on the Rock's 720x1280 display.
+    /// Inspired by classic terminal-on-white (x61s i3 style).
+    pub const fn light() -> Self {
+        Self {
+            bg: Color::White,           // standard white bg (works on TERM=linux)
+            accent: Color::DarkGray,    // dark gray — titles, button labels
+            accent_dim: Color::Gray,    // gray — borders, secondary text
+            title_dim: Color::DarkGray, // subtitle
+            body: Color::Black,         // black — main meditation text
+            pause: Color::DarkGray,     // pause markers
+            status: Color::DarkGray,    // status label
+        }
+    }
+
+    /// Dark theme — black background, phosphor green/amber.
+    /// Classic retro CRT look. Better for indoor/dim environments.
+    #[expect(dead_code)] // available for user toggle, not yet wired
+    pub const fn dark() -> Self {
+        Self {
+            bg: Color::Reset,                    // terminal default (black)
+            accent: Color::Rgb(255, 176, 0),     // amber — titles, highlights
+            accent_dim: Color::Rgb(40, 110, 60), // dim green — borders
+            title_dim: Color::Rgb(160, 110, 0),  // dim amber — subtitle
+            body: Color::Rgb(200, 200, 180),     // soft white — main text
+            pause: Color::Rgb(120, 100, 180),    // purple — pause markers
+            status: Color::Rgb(80, 220, 120),    // phosphor green — status
+        }
+    }
 }
 
 /// Application lifecycle state.
@@ -112,10 +144,12 @@ pub struct App {
     generation_start: Option<Instant>,
     /// Active pause countdown: seconds remaining. `None` if not pausing.
     pub pause_remaining: Option<f32>,
+    /// Color theme — light (outdoor) or dark (indoor/retro CRT).
+    pub theme: Theme,
 }
 
 impl App {
-    /// Create a new [`App`] in [`AppState::Idle`].
+    /// Create a new [`App`] in [`AppState::Idle`] with the light theme (outdoor).
     pub fn new() -> Self {
         Self {
             all_lines: Vec::new(),
@@ -125,6 +159,7 @@ impl App {
             token_count: 0,
             generation_start: None,
             pause_remaining: None,
+            theme: Theme::light(),
         }
     }
 
@@ -137,37 +172,21 @@ impl App {
     /// Push a new sentence and make it visible immediately.
     ///
     /// Called when the LLM emits a complete sentence. The sentence appears
-    /// at the bottom of the text area and auto-scrolls to keep it in view.
-    /// Not yet used — will be called from LLM streaming integration.
-    #[expect(dead_code)]
+    /// at the bottom of the text area. Auto-scrolls to keep the latest text
+    /// in view, even if the user previously scrolled up — the meditation
+    /// text should always follow the live generation.
+    #[expect(clippy::cast_possible_truncation)] // line counts are small
     pub fn push_sentence(&mut self, sentence: String) {
         self.all_lines.push(sentence);
+        // Add a blank line after each sentence/pause for vertical spacing.
+        // This makes the text more spacious and meditative, and naturally
+        // limits the visible content to ~5-8 items on the 40-row display.
+        self.all_lines.push(String::new());
         self.visible_count = self.all_lines.len();
-    }
-
-    /// Push a line without revealing it yet.
-    ///
-    /// Used for preloading demo text. Call [`reveal_next`] to show lines
-    /// one at a time.
-    pub fn push_hidden(&mut self, line: String) {
-        self.all_lines.push(line);
-    }
-
-    /// Reveal the next hidden line. Returns `true` if a line was revealed.
-    pub fn reveal_next(&mut self) -> bool {
-        if self.visible_count < self.all_lines.len() {
-            self.visible_count += 1;
-            true
-        } else {
-            false
+        // Auto-scroll: keep the bottom of the text visible.
+        if self.visible_count > 5 {
+            self.scroll = (self.visible_count - 5) as u16;
         }
-    }
-
-    /// Reveal all remaining hidden lines at once.
-    /// Not yet used — will be called when user skips ahead during generation.
-    #[expect(dead_code)]
-    pub fn reveal_all(&mut self) {
-        self.visible_count = self.all_lines.len();
     }
 
     /// Transition to [`AppState::Generating`] and start the speed timer.
@@ -237,6 +256,9 @@ impl App {
 /// - **Body**: meditation text with pause markers styled (sentence reveal)
 /// - **Footer**: state, stats, pause countdown, and button mappings
 pub fn render(frame: &mut Frame, app: &App) {
+    let t = &app.theme;
+    let bg = Style::default().bg(t.bg);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -246,20 +268,24 @@ pub fn render(frame: &mut Frame, app: &App) {
         ])
         .split(frame.area());
 
+    // Fill background
+    frame.render_widget(Block::default().style(bg), frame.area());
+
     // Header — retro zen banner
     let banner = vec![Line::from(vec![
         Span::styled(
             "༄  jhana-rs  ",
             Style::default()
-                .fg(palette::AMBER)
+                .fg(t.accent)
+                .bg(t.bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("～ breathe ～", Style::default().fg(palette::DIM_AMBER)),
+        Span::styled("～ breathe ～", Style::default().fg(t.title_dim).bg(t.bg)),
     ])];
     let header = Paragraph::new(banner).alignment(Alignment::Center).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette::DIM_GREEN)),
+            .border_style(Style::default().fg(t.accent_dim).bg(t.bg)),
     );
     frame.render_widget(header, chunks[0]);
 
@@ -273,7 +299,8 @@ pub fn render(frame: &mut Frame, app: &App) {
                 Line::from(Span::styled(
                     format!("  · · · {inner} · · ·"),
                     Style::default()
-                        .fg(palette::PAUSE)
+                        .fg(t.pause)
+                        .bg(t.bg)
                         .add_modifier(Modifier::DIM),
                 ))
             } else if s.is_empty() {
@@ -281,7 +308,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             } else {
                 Line::from(Span::styled(
                     format!("  {s}"),
-                    Style::default().fg(palette::SOFT_WHITE),
+                    Style::default().fg(t.body).bg(t.bg),
                 ))
             }
         })
@@ -293,10 +320,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(palette::DIM_GREEN))
+                .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
                 .title(Span::styled(
                     " meditation ",
-                    Style::default().fg(palette::GREEN),
+                    Style::default().fg(t.status).bg(t.bg),
                 )),
         );
     frame.render_widget(body, chunks[1]);
@@ -306,37 +333,35 @@ pub fn render(frame: &mut Frame, app: &App) {
     let footer_lines = vec![
         Line::from(status_spans),
         Line::from(vec![
-            Span::styled("  ←", Style::default().fg(palette::AMBER)),
-            Span::styled("quit ", Style::default().fg(palette::DIM_GREEN)),
-            Span::styled("→", Style::default().fg(palette::AMBER)),
-            Span::styled("start ", Style::default().fg(palette::DIM_GREEN)),
-            Span::styled("↑", Style::default().fg(palette::AMBER)),
-            Span::styled("up ", Style::default().fg(palette::DIM_GREEN)),
-            Span::styled("↓", Style::default().fg(palette::AMBER)),
-            Span::styled("down ", Style::default().fg(palette::DIM_GREEN)),
-            Span::styled("q", Style::default().fg(palette::AMBER)),
-            Span::styled(":quit", Style::default().fg(palette::DIM_GREEN)),
+            Span::styled("  ←", Style::default().fg(t.accent).bg(t.bg)),
+            Span::styled("quit ", Style::default().fg(t.accent_dim).bg(t.bg)),
+            Span::styled("→", Style::default().fg(t.accent).bg(t.bg)),
+            Span::styled("start ", Style::default().fg(t.accent_dim).bg(t.bg)),
+            Span::styled("↑", Style::default().fg(t.accent).bg(t.bg)),
+            Span::styled("up ", Style::default().fg(t.accent_dim).bg(t.bg)),
+            Span::styled("↓", Style::default().fg(t.accent).bg(t.bg)),
+            Span::styled("down ", Style::default().fg(t.accent_dim).bg(t.bg)),
+            Span::styled("q", Style::default().fg(t.accent).bg(t.bg)),
+            Span::styled(":quit", Style::default().fg(t.accent_dim).bg(t.bg)),
         ]),
     ];
     let footer = Paragraph::new(footer_lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette::DIM_GREEN)),
+            .border_style(Style::default().fg(t.accent_dim).bg(t.bg)),
     );
     frame.render_widget(footer, chunks[2]);
 }
 
 /// Build the status line spans based on current app state.
-///
-/// Shows different information depending on lifecycle state:
-/// - **Idle**: just the state name
-/// - **Generating**: state + token count + tokens/sec
-/// - **Paused**: state + countdown
-/// - **Done**: state + final token count
 fn build_status_spans(app: &App) -> Vec<Span<'_>> {
+    let t = &app.theme;
     let mut spans = vec![
-        Span::styled("  ◈ ", Style::default().fg(palette::AMBER)),
-        Span::styled(app.state.to_string(), Style::default().fg(palette::GREEN)),
+        Span::styled("  ◈ ", Style::default().fg(t.accent).bg(t.bg)),
+        Span::styled(
+            app.state.to_string(),
+            Style::default().fg(t.status).bg(t.bg),
+        ),
     ];
 
     match app.state {
@@ -344,21 +369,21 @@ fn build_status_spans(app: &App) -> Vec<Span<'_>> {
             let tps = app.tokens_per_sec();
             spans.push(Span::styled(
                 format!("  {} tok  {tps:.1} t/s", app.token_count),
-                Style::default().fg(palette::DIM_GREEN),
+                Style::default().fg(t.accent_dim).bg(t.bg),
             ));
         }
         AppState::Paused => {
             if let Some(remaining) = app.pause_remaining {
                 spans.push(Span::styled(
                     format!("  · · · {remaining:.0}s · · ·"),
-                    Style::default().fg(palette::PAUSE),
+                    Style::default().fg(t.pause).bg(t.bg),
                 ));
             }
         }
         AppState::Done => {
             spans.push(Span::styled(
                 format!("  {} tok", app.token_count),
-                Style::default().fg(palette::DIM_GREEN),
+                Style::default().fg(t.accent_dim).bg(t.bg),
             ));
         }
         AppState::Idle => {}

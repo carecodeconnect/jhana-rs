@@ -42,11 +42,14 @@ within 3s of prompt.
 - [x] TUI state transitions (Idle -> Generating -> Paused -> Done)
 - [x] Live token count and speed display in footer
 - [x] Sentence-by-sentence reveal (not all at once)
+- [ ] Light/outdoor theme (white bg, dark text, retro style — match x61s i3 look)
 - [ ] Pause marker countdown timer in TUI (scaffolded, activates with LLM)
 
 ## 2. LLM Integration
 
-Model on device needs replacing: GGML v3 format is deprecated, must use GGUF.
+**Decision: mistral.rs + Ministral 3B** (2026-05-07). See `docs/02_LLM.md`.
+mistral.rs runs as a local HTTP server (OpenAI-compatible API, port 8321).
+jhana-rs connects via minreq (pure Rust HTTP), parses SSE streaming tokens.
 
 - [x] Create `src/llm.rs` module with ChunkParser and LlmOutput types
 - [x] Implement bracket state machine for pause marker parsing
@@ -56,23 +59,24 @@ Model on device needs replacing: GGML v3 format is deprecated, must use GGUF.
 - [x] Download Orca Mini 3B GGUF (1.9 GB) to Rock
 - [x] Benchmark llama-cpp-2: **5.8 tok/s** on Orca Mini 3B Q4_0 (target was >2.5)
 - [x] Benchmark llama-gguf: **~0.25 tok/s** — 23x slower, no ARM NEON
-- [x] Decision: **use llama-cpp-2** for inference on Rock 5A
-- [ ] Download Orca Mini 3B GGUF (~2 GB) to replace old GGML v3 model
-- [ ] Load GGUF model on Rock, verify it loads
-- [ ] Configure inference params (top_k=40, top_p=0.95, temp=0.25, repeat_penalty=1.1)
-- [ ] Clean meditation examples (docs/meditation_examples_raw/) into system/user prompts
-- [ ] System prompt for meditation guide with [pause] markers
-- [ ] Streaming token output via crossbeam channel
-- [ ] Sentence-level buffering (accumulate tokens until sentence boundary)
-- [ ] Parse [pause_duration] markers from LLM output
-- [ ] Define LlmOutput enum (Sentence, Pause, Done)
+- [x] Decision: **mistral.rs + Ministral 3B** (3.89 tok/s, native [N] pauses)
+- [x] Download Ministral 3B GGUF (2.0 GB) to Rock
+- [x] Load GGUF model via mistral.rs server, verify it loads
+- [x] Benchmark mistral.rs: **3.89 tok/s** (exceeds 2.5 target)
+- [x] Clean meditation examples into system/user prompts (`prompts/`)
+- [x] System prompt for meditation guide with [N] markers
+- [x] 6 meditation types: flower garden, lotus, sun, fountain, soup, lake
+- [x] Streaming token output via mpsc channel (SSE -> ChunkParser -> TUI)
+- [x] Sentence-level buffering (ChunkParser splits on `.` boundary)
+- [x] Parse [N] pause markers from LLM output
+- [x] LlmOutput enum (Sentence, Pause, Done, Error)
+- [x] Wire LLM output to TUI display (live streaming)
+- [x] Rustdoc for llm module
+- [x] SSE parser tests (canned data via Cursor)
 - [ ] Pin LLM thread to Cortex-A76 cores (cores 4-7) for performance
-- [ ] Wire LLM output to TUI display (live streaming)
-- [ ] Text prompt input via stdin or TUI
-- [ ] Measure tokens/second on Rock, verify >2.5 tok/s
-- [ ] Memory profiling: verify LLM stays within budget (~1.8 GB)
-- [ ] Tests for sentence buffering and pause marker parsing
-- [ ] Rustdoc for llm module
+- [ ] Meditation type selection menu in TUI
+- [ ] Measure tokens/second on Rock with live TUI, verify >2.5 tok/s
+- [ ] Memory profiling: verify LLM stays within budget (~2 GB)
 
 ## 3. Audio & TTS Integration
 
@@ -168,18 +172,25 @@ Capture TUI screen + audio (TTS output / mic input) for project demos.
    ffmpeg -i tui.mp4 -i audio.wav -c:v copy -c:a aac demo.mp4
    ```
 
+### Scripts
+
+- `scripts/rock-demo-record.sh [duration]` — start recording + TUI
+- `scripts/rock-demo-stop.sh` — stop recording, list demos
+
 ### TODO
 
-- [ ] Install VHS on Rock (`go install github.com/charmbracelet/vhs@latest` or binary)
-- [ ] Create `.tape` script for meditation demo flow
+- [x] Install ffmpeg on Rock
+- [x] Create `rock-demo-record.sh` (framebuffer + ALSA -> MP4)
+- [x] Create `rock-demo-stop.sh` (clean stop + list demos)
 - [ ] Test framebuffer capture with `ffmpeg -f fbdev`
 - [ ] Test audio capture from Uctronics speaker (card 2)
-- [ ] Produce first demo GIF for README
-- [ ] Produce first demo MP4 with audio for project showcase
+- [ ] Produce first demo MP4 with audio
+- [ ] Extract GIF from MP4 for README (`ffmpeg -i demo.mp4 -vf fps=10 demo.gif`)
+- [ ] Produce polished demo for project showcase
 
 ## Phase 4: Hardware Integration (future)
 
-- [ ] Slint graphical display (DRM/KMS, no GPU)
+- [ ] Slint graphical display (DRM/KMS, no GPU) — larger meditation text font
 - [ ] Serial output to /dev/ttyS6 at 115200 baud
 - [ ] systemd service (jhana-rs.service)
 - [ ] Boot-to-app: auto-start on power on
