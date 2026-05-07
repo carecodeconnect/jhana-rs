@@ -82,7 +82,7 @@ All tests use:
 | llama-gguf v0.14 | ~0.25 | — | 1.46s | Poor | protobuf-compiler | Tested |
 | OxiLLaMa v0.1.3 | **CRASH** | — | 0.01s | — | None | OOM: 13.3 GB alloc on 8 GB |
 | OxiBonsai | **SKIP** | — | — | — | None | Q1_0 only — no Q4_0 support |
-| Candle | — | — | — | — | None | Pending |
+| Candle v0.10.2 | **3.03** | — | 0.09s | Gibberish | libssl-dev | NEON works, model compat issue |
 
 ### Analysis so far
 
