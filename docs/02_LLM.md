@@ -52,6 +52,29 @@ Both crates build successfully on Rock 5A (aarch64):
 llama-cpp-2 compiled the full llama.cpp C++ library from source on the
 Cortex-A76 cores. First build ~5 min, subsequent builds cached.
 
+### Inference benchmark (2026-05-07)
+
+Model: Orca Mini 3B Q4_0 GGUF (1.9 GB) via llama-cpp-2.
+
+| Metric | Value |
+|--------|-------|
+| Tokens/sec | **5.8** |
+| Time to first token | 1ms |
+| Model load time | 23.85s |
+| Tokens generated | 100 |
+| Generation time | 17.11s |
+| Model RAM (mmap) | ~1.9 GB |
+| KV cache | 650 MB |
+
+5.8 tok/s exceeds the 2.5 tok/s target. Faster than spoken speech, so
+TTS pipeline will keep up. Flash Attention auto-enabled.
+
+Note: Orca Mini 3B did not produce `[pause]` markers with the basic
+prompt — it's not fine-tuned for that. Options:
+1. More aggressive few-shot prompting
+2. Use a better instruction-following model (Qwen3-4B, Llama 3.2 3B)
+3. Fine-tune a small model with pause markers (like jhana-mistral)
+
 ---
 
 ## Test Plan

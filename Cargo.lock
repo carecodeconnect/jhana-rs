@@ -1100,6 +1100,7 @@ name = "jhana-rs"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "encoding_rs",
  "llama-cpp-2",
  "llama-gguf",
  "log",
