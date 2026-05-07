@@ -6,6 +6,11 @@ description = "Voice-driven meditation guide for Radxa Rock 5A (aarch64)"
 license = "MIT"
 
 [dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+log = "0.4"
+simplelog = "0.12"
+signal-hook = "0.3"
 
 [lints.rust]
 unsafe_code = "forbid"

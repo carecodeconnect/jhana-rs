@@ -99,25 +99,66 @@ sudo chvt 1
 
 ### Console font size
 
-The default console font may be small on the 720x1280 display. To set a
-larger font:
+The pygame captioning service used 70px Noto font. Console fonts max out at
+32px height (Terminus). On the 720x1280 display, TerminusBold 32x16 gives
+45 columns x 40 rows -- the closest match available.
 
+Install console-setup (required -- not present on stock image):
 ```bash
-sudo dpkg-reconfigure console-setup
-# Choose: UTF-8 -> Guess -> Terminus -> 16x32 (or largest available)
+sudo apt install console-setup
 ```
 
-Or set it directly:
+Set font (one-time):
 ```bash
-sudo setfont /usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz 2>/dev/null \
-  || sudo apt install console-setup && sudo setfont Lat15-TerminusBold32x16.psf.gz
+sudo setfont /usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz
 ```
 
-### ratatui over SSH
+Persist across reboots -- edit `/etc/default/console-setup`:
+```
+CODESET="Uni3"
+FONTFACE="TerminusBold"
+FONTSIZE="32x16"
+```
 
-For Phase 1 development, the ratatui TUI runs in the SSH terminal. The
-Rock's physical display is not needed until Phase 4 (hardware integration).
-The SSH session gives full terminal capabilities for ratatui rendering.
+Then apply:
+```bash
+sudo setupcon
+```
+
+Configured 2026-05-07. Font is Uni3-TerminusBold32x16 (Unicode, bold,
+32px height, 16px width).
+
+### Suppress kernel console messages
+
+The RK3588S DMA controller logs `fill_queue` errors to the console (tty1),
+which overwrite the ratatui TUI. These are harmless hardware messages --
+suppressing console output does not disable logging. Messages still go to
+`dmesg` and `/var/log/kern.log`.
+
+```bash
+# Suppress (only KERN_EMERG printed to console)
+sudo dmesg -n 1
+
+# Restore default (for debugging kernel issues)
+sudo dmesg -n 7
+```
+
+This is non-persistent -- resets on reboot. To make permanent, add
+`loglevel=1` to the kernel cmdline in `/boot/extlinux/extlinux.conf`.
+
+### ratatui on the Rock display
+
+The ratatui TUI runs on tty1 (the Rock's physical display). SSH is used
+for development and can also run the TUI, but the primary target is the
+physical screen visible on the device.
+
+Run the TUI on the physical display (via SSH):
+```bash
+sudo TERM=linux setsid ./target/debug/jhana-rs </dev/tty1 >/dev/tty1 2>/dev/tty1 &
+```
+
+Logs go to `jhana-rs.log` in the working directory. Quit via `q` key on
+the physical keyboard, or `sudo kill <pid>` / `SIGTERM` from SSH.
 
 ---
 
@@ -125,32 +166,49 @@ The SSH session gives full terminal capabilities for ratatui rendering.
 
 ### Why build on the Rock
 
-The X61s is an x86_64 machine. The Rock 5A is aarch64. Cross-compiling Rust
-with C/C++ dependencies (llama.cpp, whisper.cpp) is complex and fragile. The
-simpler path is to build natively on the Rock.
+The X61s (Core 2 Duo L7500) is too slow for Rust compilation and is x86_64
+while the Rock 5A is aarch64. Cross-compiling with C/C++ dependencies
+(llama.cpp, whisper.cpp) is complex and fragile. **All builds happen on the
+Rock.** The X61s is only used for editing, linting, and `cargo check`.
 
-The Rock 5A's Cortex-A76 cores are reasonably capable for compilation.
-Release builds will be slow, but debug builds during development are
-acceptable.
+The Rock 5A's Cortex-A76 cores handle debug builds well. Release builds are
+slower but acceptable.
+
+### What runs where
+
+| Machine | Arch | Role | Commands |
+|---------|------|------|----------|
+| X61s | x86_64 | Edit, lint, check | `cargo fmt`, `cargo clippy`, `cargo check` |
+| Rock 5A | aarch64 | **Build, run, test, doc** | `cargo build`, `cargo run`, `cargo test`, `cargo doc` |
+
+The Cargo.toml is the same on both machines. The X61s can run `cargo check`
+and clippy (they verify code without linking) but **never `cargo build`** --
+it's too slow and the wrong architecture.
 
 ### Workflow: edit on X61s, build on Rock
 
 1. **Edit** code on the X61s in `~/projects/jhana-rs/`.
 
-2. **Sync** to the Rock via scp:
+2. **Check locally** (fast feedback on x86_64 -- no cross-compile needed):
    ```bash
-   scp -r ~/projects/jhana-rs/ ubuntu@192.168.1.102:~/jhana-rs/
+   cargo check
+   cargo clippy
+   ```
+   Run `cargo check` after every code change, before syncing to Rock.
+   Pre-commit hooks run `rustfmt` and `clippy` automatically on commit.
+
+3. **Sync** to the Rock via rsync (installed 2026-05-07 via `sudo apt install rsync`):
+   ```bash
+   sshpass -p 'ubunturock' rsync -avz --exclude target/ \
+     -e "ssh -o StrictHostKeyChecking=no" \
+     ~/projects/jhana-rs/ ubuntu@192.168.1.102:~/jhana-rs/
    ```
 
-   Or use rsync for incremental syncs (faster after the first copy):
-   ```bash
-   rsync -avz --exclude target/ ~/projects/jhana-rs/ ubuntu@192.168.1.102:~/jhana-rs/
-   ```
-
-3. **Build and run** on the Rock via SSH:
+4. **Build and run** on the Rock via SSH:
    ```bash
    ssh ubuntu@192.168.1.102
    cd ~/jhana-rs
+   cargo check   # verify on aarch64 before building
    cargo build
    cargo run
    ```
@@ -158,7 +216,7 @@ acceptable.
 ### Alternative: edit directly on Rock via SSH
 
 Use your preferred terminal editor (vim, nano, helix) over SSH. This avoids
-the scp step but is less comfortable for large edits.
+the sync step but is less comfortable for large edits.
 
 ### Give the Rock internet access (NAT forwarding)
 
@@ -199,42 +257,56 @@ cd jhana-rs && git pull
 
 ---
 
-## Install Rust Toolchain on the Rock
+## Pre-commit Hooks
 
-### Prerequisites
+The repo includes a pre-commit hook that runs `rustfmt` and `clippy` on
+staged `.rs` files. Commits are blocked if either check fails.
 
-First, expand the root partition (only 917 MB free on the 29.7 GB eMMC):
-
+Install (on X61s -- runs against the local x86_64 toolchain):
 ```bash
-# Check current partition layout
-lsblk
-# mmcblk1p3 is the root partition (10.1 GB on a 29.7 GB disk)
-
-# Expand partition (CAREFUL -- backup first if needed)
-sudo parted /dev/mmcblk1 resizepart 3 100%
-sudo resize2fs /dev/mmcblk1p3
-
-# Verify
-df -h /
+cp scripts/pre-commit .git/hooks/pre-commit
 ```
 
-### Install Rust
+The hook runs:
+1. `cargo fmt -- --check` (fails if formatting is wrong)
+2. `cargo clippy -- -D warnings` (fails on any warning)
+
+To fix formatting before committing: `cargo fmt`
+
+---
+
+## Install Rust Toolchain
+
+### X61s (dev machine)
+
+Rust is pre-installed. Used for `cargo check`, `cargo clippy`, `cargo fmt`,
+and pre-commit hooks only (no cross-compilation).
+
+```
+rustc 1.94.1 (x86_64)
+```
+
+### Rock 5A (build target)
+
+Requires internet access (see NAT forwarding above) and expanded disk space
+(see below).
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
+```
 
-# Build dependencies
+Build dependencies (already installed on the device):
+```bash
 sudo apt install build-essential cmake pkg-config libasound2-dev
 ```
 
-### Verify
-
-```bash
-rustc --version
-cargo --version
-cargo clippy --version
-rustfmt --version
+Installed 2026-05-07:
+```
+rustc 1.95.0 (aarch64)
+cargo 1.95.0
+clippy 0.1.95
+rustfmt 1.9.0
 ```
 
 ---
