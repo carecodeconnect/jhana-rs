@@ -169,7 +169,7 @@ All three exceed the 2.5 tok/s target by 3-4x.
 ### Additional candidates (testing)
 
 - **[crabml](https://github.com/crabml/crabml)**: Pure Rust, explicit
-  ARM NEON via RUSTFLAGS, GGUF support. Building on Rock.
+  ARM NEON via RUSTFLAGS, GGUF support. **Failed to compile on aarch64.**
 - **[mistral.rs](https://github.com/EricLBuehler/mistral.rs)**: Fast
   flexible inference, GGUF + many quant formats, auto-detects arch.
   Building on Rock. Testing with Ministral 3B (smallest Mistral model).
