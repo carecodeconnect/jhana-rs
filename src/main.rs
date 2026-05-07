@@ -81,7 +81,13 @@ fn main() -> io::Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    info!("jhana-rs exiting");
+    info!("jhana-rs exiting, restoring console");
+
+    // Restore console: re-apply the large font and spawn a login prompt.
+    // The TUI runs detached from tty1's session (via setsid), so there is
+    // no shell to return to. We reset the console and start getty so the
+    // user gets a login prompt with the correct font.
+    restore_console();
 
     result
 }
@@ -160,5 +166,34 @@ fn ctrlc_handler(quit: &Arc<AtomicBool>) {
     }
     if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGINT, quit) {
         error!("failed to register SIGINT handler: {e}");
+    }
+}
+
+/// Restore the console after TUI exit.
+///
+/// The TUI runs detached via `setsid` so there is no parent shell on tty1.
+/// This function clears the screen, re-applies the large console font, and
+/// restarts `getty` on tty1 to give the user a login prompt they can type into.
+fn restore_console() {
+    use std::process::Command;
+
+    let commands: &[&[&str]] = &[
+        // Reset terminal and clear screen
+        &["bash", "-c", "echo -e '\\033c' > /dev/tty1"],
+        // Re-apply large console font (may have been reset by alternate screen)
+        &[
+            "setfont",
+            "/usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz",
+        ],
+        // Restart getty on tty1 for a login prompt
+        &["systemctl", "restart", "getty@tty1.service"],
+    ];
+
+    for cmd in commands {
+        match Command::new(cmd[0]).args(&cmd[1..]).status() {
+            Ok(s) if s.success() => info!("restore: {} ok", cmd.join(" ")),
+            Ok(s) => error!("restore: {} exited {s}", cmd.join(" ")),
+            Err(e) => error!("restore: {} failed: {e}", cmd.join(" ")),
+        }
     }
 }
