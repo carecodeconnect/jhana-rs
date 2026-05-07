@@ -160,28 +160,39 @@ acceptable.
 Use your preferred terminal editor (vim, nano, helix) over SSH. This avoids
 the scp step but is less comfortable for large edits.
 
-### Alternative: git-based workflow
+### Give the Rock internet access (NAT forwarding)
 
-Once the GitHub repo is set up and the Rock has internet access (via NAT
-forwarding from the X61s), you could push from the X61s and pull on the Rock.
-This requires setting up IP forwarding on the laptop:
+The Rock has no internet by default -- it's on a direct ethernet link to the
+X61s. To install packages or pull from git, forward the X61s wifi connection.
 
+On the X61s (one-time, until reboot):
 ```bash
-# On the X61s (one-time, until reboot)
 sudo sysctl -w net.ipv4.ip_forward=1
-sudo iptables -t nat -A POSTROUTING -o wlp3s0 -j MASQUERADE
-sudo iptables -A FORWARD -i enp0s25 -o wlp3s0 -j ACCEPT
-sudo iptables -A FORWARD -i wlp3s0 -o enp0s25 -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+sudo iptables -A FORWARD -i enp0s25 -o wlan0 -j ACCEPT
+sudo iptables -A FORWARD -i wlan0 -o enp0s25 -m state --state RELATED,ESTABLISHED -j ACCEPT
 ```
 
-(Replace `wlp3s0` with your internet-facing interface.)
-
-Then on the Rock:
+On the Rock (via SSH):
 ```bash
-# Test internet access
-ping -c 1 8.8.8.8
+sudo ip route add default via 192.168.1.1
+echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf
+```
 
-# Clone and pull
+Verify:
+```bash
+ping -c 1 8.8.8.8
+```
+
+Confirmed working 2026-05-07. The X61s wifi interface is `wlan0`, ethernet
+to Rock is `enp0s25`.
+
+### Alternative: git-based workflow
+
+With internet access enabled above, you can push from the X61s and pull on
+the Rock:
+
+```bash
 git clone https://github.com/carecodeconnect/jhana-rs.git
 cd jhana-rs && git pull
 ```
@@ -230,15 +241,54 @@ rustfmt --version
 
 ## Expand Disk Space
 
-The 32 GB eMMC has ~19 GB of unpartitioned space. The NLLB translation model
-(~1.2 GB) in `/home/ubuntu/ai_in_a_box/downloaded/nllb-200-distilled-600M/`
-is not needed for jhana-rs and can be deleted to free additional space.
+### Pre-resize state (2026-05-07)
+
+```
+Partition Table: gpt (31.9 GB eMMC)
+  1  config   16.8 MB  fat32
+  2  boot    315   MB  fat32
+  3  rootfs   10.9 GB  ext4   (8.6 GB used, 917 MB free, 91% full)
+     free     20.7 GB          unallocated at end of disk
+
+Filesystem state: clean (no errors, not dirty)
+```
+
+This is safe to resize online because:
+- No partitions exist after partition 3 -- the 20.7 GB is contiguous free
+  space at the end of the disk.
+- ext4 supports online (mounted) growth via `resize2fs`. Only metadata is
+  updated; no data moves.
+- `resizepart` only shifts the partition end boundary forward.
+
+### Expand the root partition
 
 ```bash
-# Delete translation model (not needed for jhana-rs)
-rm -rf /home/ubuntu/ai_in_a_box/downloaded/nllb-200-distilled-600M/
+# Grow partition 3 to fill the disk (moves end boundary only)
+# parted will warn "Partition is being used" -- answer Yes
+sudo parted /dev/mmcblk1 resizepart 3 100%
 
-# Check free space after partition expansion + model deletion
+# Grow the ext4 filesystem to match (online, no unmount needed)
+sudo resize2fs /dev/mmcblk1p3
+
+# Verify
 df -h /
-# Should show ~20+ GB free
+```
+
+### Post-resize state (2026-05-07)
+
+```
+/dev/mmcblk1p3   29G  8.6G   20G  31% /
+```
+
+Resized online while mounted. No reboot required. All data intact.
+
+### Delete unused models
+
+The NLLB translation model (~1.2 GB) in
+`/home/ubuntu/ai_in_a_box/downloaded/nllb-200-distilled-600M/` is not needed
+for jhana-rs and can be deleted to free additional space.
+
+```bash
+rm -rf /home/ubuntu/ai_in_a_box/downloaded/nllb-200-distilled-600M/
+df -h /
 ```
