@@ -100,7 +100,7 @@ anything for the POC.
 - Context size: 2048 tokens
 - Inference params: top_k=40, top_p=0.95, temp=0.25, repeat_penalty=1.1
 - Streaming token output with sentence-level buffering
-- Parse `[pause_duration]` markers from meditation prompts
+- Parse `[pause_duration]` markers from meditation output (see below)
 
 ```rust
 enum LlmOutput {
@@ -110,16 +110,42 @@ enum LlmOutput {
 }
 ```
 
-Prompt engineering with system prompt + few-shot examples replaces fine-tuning:
+#### Pause marker strategy
+
+The Python jhana-dev used a **fine-tuned Mistral 7B**
+([carecodeconnect/jhana-mistral-GGUF](https://huggingface.co/carecodeconnect/jhana-mistral-GGUF))
+that was trained to emit `[duration]` markers (e.g. `[5]`, `[3.5]`) inline
+with meditation text. The training dataset baked these markers into the
+output, so the model produced them naturally.
+
+For the Rust POC, we use Orca Mini 3B (untrained for pause markers). Two
+options:
+
+1. **Prompt engineering** (POC): System prompt + few-shot examples instruct
+   the model to emit `[N]` markers. Less reliable than fine-tuning but
+   works for demonstration.
+2. **Fine-tune** (upgrade): Train a small model (Qwen3-4B or similar) on
+   meditation texts with embedded pause markers, similar to the original
+   jhana-mistral approach.
+
+The pause parsing logic is a simple bracket state machine (ported from
+`jhana-dev/src/meditation_guide.py`):
+- Text outside `[]` accumulates in a sentence buffer
+- `[` enters pause mode, `]` exits it
+- Content between brackets is parsed as `float` seconds
+- Pauses only fire after at least one sentence has been spoken (skip
+  leading pauses)
+
+#### POC prompt
 
 ```
 System: You are a meditation guide. Generate calming, guided meditation
-instructions. Use [pause_duration] markers (e.g. [10]) to indicate silent
-pauses. Speak in a warm, gentle tone. Keep sentences short for TTS.
+instructions. Use [N] markers (e.g. [10]) to indicate silent pauses of
+N seconds. Speak in a warm, gentle tone. Keep sentences short for TTS.
 
 Example:
-"Close your eyes and take a deep breath in. [5] Now slowly exhale, releasing
-any tension you feel. [3] Let your shoulders drop. [10]"
+"Close your eyes and take a deep breath in. [5] Now slowly exhale,
+releasing any tension you feel. [3] Let your shoulders drop. [10]"
 ```
 
 #### Upgrade: Qwen3-4B Q4_K_M

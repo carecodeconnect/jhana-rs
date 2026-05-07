@@ -27,7 +27,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use simplelog::{Config, LevelFilter, WriteLogger};
 
 use crate::gpio::ButtonEvent;
-use crate::ui::{App, render};
+use crate::ui::{App, AppState, render};
 
 fn main() -> io::Result<()> {
     // File logger — all output goes to jhana-rs.log, not stdout/tty
@@ -60,18 +60,23 @@ fn main() -> io::Result<()> {
     info!("terminal initialized, entering event loop");
 
     let mut app = App::new();
-    app.lines = vec![
-        String::from("Close your eyes and take a deep breath in."),
-        String::new(),
-        String::from("[pause 5s]"),
-        String::new(),
-        String::from("Now slowly exhale, releasing any tension you feel."),
-        String::new(),
-        String::from("[pause 3s]"),
-        String::new(),
-        String::from("Let your shoulders drop."),
+
+    // Demo text — loaded hidden, revealed sentence-by-sentence when
+    // the user presses ENTER/→. Simulates the LLM streaming flow.
+    let demo_lines = [
+        "Close your eyes and take a deep breath in.",
+        "",
+        "[pause 5s]",
+        "",
+        "Now slowly exhale, releasing any tension you feel.",
+        "",
+        "[pause 3s]",
+        "",
+        "Let your shoulders drop.",
     ];
-    app.state = String::from("Demo");
+    for line in &demo_lines {
+        app.push_hidden((*line).to_string());
+    }
 
     // Main event loop
     let result = run_loop(&mut terminal, &mut app, &quit, button_rx.as_ref());
@@ -114,15 +119,9 @@ fn run_loop(
                 info!("button: {event:?}");
                 match event {
                     ButtonEvent::Back => return Ok(()),
-                    ButtonEvent::Up => {
-                        app.scroll_up();
-                    }
-                    ButtonEvent::Down => {
-                        app.scroll_down();
-                    }
-                    ButtonEvent::Enter => {
-                        info!("enter pressed (start)");
-                    }
+                    ButtonEvent::Up => app.scroll_up(),
+                    ButtonEvent::Down => app.scroll_down(),
+                    ButtonEvent::Enter => handle_start(app),
                 }
             }
         }
@@ -137,25 +136,64 @@ fn run_loop(
                     info!("quit key pressed");
                     break;
                 }
-                KeyCode::Up => {
-                    app.scroll_up();
-                    info!("scroll up (key)");
-                }
-                KeyCode::Down => {
-                    app.scroll_down();
-                    info!("scroll down (key)");
-                }
-                KeyCode::Enter => {
-                    info!("enter key pressed");
-                }
+                KeyCode::Up => app.scroll_up(),
+                KeyCode::Down => app.scroll_down(),
+                KeyCode::Enter => handle_start(app),
                 other => {
                     info!("key: {other:?}");
                 }
             }
         }
+
+        // Demo: auto-reveal next line every 500ms while generating
+        if app.state == AppState::Generating {
+            if app.reveal_next() {
+                app.token_count += 8; // simulated tokens per sentence
+                info!("revealed line (demo), tokens={}", app.token_count);
+            } else {
+                app.finish();
+                info!("demo generation complete");
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Handle START/ENTER action based on current state.
+///
+/// - Idle: begin generating (sentence-by-sentence reveal in demo mode)
+/// - Done: reset and return to idle for another session
+/// - Generating/Paused: ignored (generation is already in progress)
+fn handle_start(app: &mut App) {
+    match app.state {
+        AppState::Idle => {
+            info!("starting demo generation");
+            app.start_generating();
+        }
+        AppState::Done => {
+            info!("resetting to idle");
+            app.reset();
+            // Re-load demo text
+            let demo_lines = [
+                "Close your eyes and take a deep breath in.",
+                "",
+                "[pause 5s]",
+                "",
+                "Now slowly exhale, releasing any tension you feel.",
+                "",
+                "[pause 3s]",
+                "",
+                "Let your shoulders drop.",
+            ];
+            for line in &demo_lines {
+                app.push_hidden((*line).to_string());
+            }
+        }
+        AppState::Generating | AppState::Paused => {
+            info!("start pressed during generation — ignored");
+        }
+    }
 }
 
 /// Register SIGTERM/SIGINT handler that sets the quit flag.

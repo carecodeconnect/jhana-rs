@@ -39,10 +39,10 @@ within 3s of prompt.
 - [x] Button labels in footer matching physical layout
 - [x] Rustdoc comments on all public items
 - [x] Integration tests for TUI rendering
-- [ ] TUI state transitions (Idle -> Generating -> Paused -> Done)
-- [ ] Live token count and speed display in footer
-- [ ] Sentence-by-sentence reveal (not all at once)
-- [ ] Pause marker countdown timer in TUI
+- [x] TUI state transitions (Idle -> Generating -> Paused -> Done)
+- [x] Live token count and speed display in footer
+- [x] Sentence-by-sentence reveal (not all at once)
+- [ ] Pause marker countdown timer in TUI (scaffolded, activates with LLM)
 
 ## 2. LLM Integration (llama-cpp-rs)
 
