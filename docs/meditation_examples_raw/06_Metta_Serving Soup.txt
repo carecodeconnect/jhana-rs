@@ -1,0 +1,35 @@
+ In order to begin, please put your attention on your breath for a few moments.
+silence: 37.0
+ Imagine that in your heart is a kitchen. And in that kitchen there's a stove, and on the stove there's a big pot of soup. Nice, warm, delicious soup.
+silence: 2.0
+ So go into the kitchen of your heart and serve yourself a nice big bowl of this warm delicious soup.
+silence: 15.0
+ Now think of someone that you care about and invite them into the kitchen of your heart. Serve them an ice-peak bowl of this warm delicious soup. The two of you sit down and enjoy your soup.
+silence: 12.0
+ Think of other people you're close to. Bring them to mind one by one and serve each of them a nice big bowl of soup.
+silence: 113.0
+ Think of your acquaintances. There's plenty of soup in the pot for them. Bring them to mine one by one and serve each of them a nice big bowl of soup.
+silence: 65.0
+ Think of someone you find difficult.
+silence: 2.0
+ and serve that person a nice bowl of soup as well.
+silence: 14.0
+ Serve bowls of soup to everyone in this room.
+silence: 16.0
+ and serve bowls of soup to all the staff here at Buddha House.
+silence: 12.0
+ It's a big pot of soup. You can serve soup to all the neighbors around here.
+silence: 8.0
+ In fact, you could serve soup to everybody that lives around this whole area of the Alps.
+silence: 17.0
+ No matter how much soup you take out of the pot, there's still plenty left. You can feed everybody in Europe.
+silence: 11.0
+ In fact, there's enough soup to feed everybody on this planet.
+silence: 2.0
+ All the hungry people get a nice delicious bowl of soup.
+silence: 48.0
+ Now put your attention back on yourself, back in your own heart, where that kitchen is.
+silence: 2.0
+ Or you're sitting and enjoying a nice bowl of soup surrounded by the people you're closest to.
+silence: 8.0
+ May all beings everywhere be happy.

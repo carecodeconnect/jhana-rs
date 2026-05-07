@@ -1,0 +1,61 @@
+ you
+silence: 4.0
+ Thank you.
+silence: 29.0
+ Imagine that in your heart is a kitchen. In the kitchen there is a stove, and on the stove is a big pot of warm delicious soup.
+silence: 3.0
+ Serve yourself a bowl of this really nourishing delicious soup from the kitchen of your heart.
+silence: 15.0
+ Think of someone you really care about. Invite them into the kitchen of your heart and serve them a nice nourishing, delicious bowl of soup.
+silence: 17.0
+ Think of other people you're close to. Bring them to mind one by one and serve each of them. Nice, warm, bold soup from the kitchen of your heart.
+silence: 191.0
+ Think of your acquaintances. Send them to mind one by one and serve each of them a bowl of nourishing soup from the kitchen of your heart.
+silence: 24.0
+ Thank you.
+silence: 67.0
+ You have someone you find difficult.
+silence: 2.0
+ There's that person in a nice bowl of soup as well.
+silence: 10.0
+ You can take a pot of soup. You can share your soup with everybody in this room.
+silence: 8.0
+ Thank you everybody here at Oakwood.
+silence: 16.0
+ No matter how much soup you serve, there's always more. There's plenty to serve to all the neighbors around here.
+silence: 14.0
+ In fact, there's enough of this nutritious, delicious soup to serve everybody in the Midwest.
+silence: 13.0
+ You can serve to everyone in North America.
+silence: 10.0
+ It's a warm, delicious soup. It goes to everybody on the planet.
+silence: 2.0
+ All the hungry people get fed. In the kitchen of your heart.
+silence: 31.0
+ Now put your attention back on yourself
+silence: 2.0
+ in the kitchen of your heart, surrounded by the people you're close to.
+silence: 2.0
+ Everybody enjoying warm, nourishing soup.
+silence: 7.0
+ May all beings everywhere be happy.
+silence: 304.0
+ Thank you.
+silence: 2.0
+ Thank you.
+silence: 16.0
+ Thank you.
+silence: 29.0
+ Thank you.
+silence: 19.0
+ Thank you.
+silence: 2.0
+ you
+silence: 36.0
+ Thank you.
+silence: 53.0
+ you
+silence: 12.0
+ you
+silence: 119.0
+

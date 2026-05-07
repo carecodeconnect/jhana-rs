@@ -1,0 +1,55 @@
+ Imagine that in your heart is a beautiful flower garden, a garden of the most exquisite flower.
+silence: 2.0
+ And then imagine that you go through forest stroll through the flower garden of your heart, enjoying its beauty.
+silence: 19.0
+ Now think of someone that you care about and pick that person a nice bouquet of flowers and present it to them. See the joy on their face.
+silence: 19.0
+ Think of other people you're close to.
+silence: 2.0
+ Bring them to mine one by one and for each of them, pick them a nice bouquet of flowers from the garden of your heart.
+silence: 71.0
+ Think of your acquaintances.
+silence: 3.0
+ Bring them to mind one by one and pick each of them. Nice bouquet of flowers from the garden of your heart.
+silence: 49.0
+ Think of someone you find difficult and pick that person a nice bouquet of flowers as well and present it to them nice.
+silence: 15.0
+ Big flowers from the garden of your heart to give to everyone in this room.
+silence: 5.0
+ and to all the people here at CloudMap.
+silence: 7.0
+ Big flowers for the neighbors.
+silence: 4.0
+ and for the people in the towns and villages around here.
+silence: 9.0
+ It's a big flower garden. You can pick flowers to give to everybody in Portland and Seattle, Vancouver.
+silence: 2.0
+ and all up and down the West Coast.
+silence: 20.0
+ There's enough flowers that you can give them to everyone in North America.
+silence: 19.0
+ Notice how much larger the flower garden is now than when you started. You can pick flowers to give to everybody on this planet.
+silence: 60.0
+ Now put your attention back on yourself.
+silence: 2.0
+ back in your own heart. And notice how much larger the flower garden is now than when you started.
+silence: 4.0
+ It's a funny thing about love. The more you give it away, the more you got.
+silence: 7.0
+ We share the merit of this retreat with all of our teachers everywhere.
+silence: 3.0
+ We share the merit of this retreat with the staff here at Cloud Mountain who have fed us so well and taken care of us so well.
+silence: 3.0
+ We share the merit of this retreat with Dalmatasa, who founded and built Cloud Mountain.
+silence: 3.0
+ We share the merit of this retreat with our families and our friends.
+silence: 2.0
+ which are acquaintances.
+silence: 2.0
+ and with the difficult people.
+silence: 3.0
+ We share the merit of this retreat with all beings and all realms.
+silence: 3.0
+ Whatever beings there may be, may all beings be happy, may all beings be peaceful.
+silence: 2.0
+ May all beings be liberated.

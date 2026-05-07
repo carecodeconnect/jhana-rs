@@ -1,0 +1,35 @@
+ In order to begin, please put your attention on your breath for a few moments.
+silence: 51.0
+ Imagine that in your heart is a large flower garden. Garden full of the most amazing varieties of beautiful flowers.
+silence: 2.0
+ And then imagine that you go for a walk through the flower garden of your heart, enjoying its beauty.
+silence: 25.0
+ Now think of someone that you care about and pick that person a nice bouquet of flowers from the garden of your heart and then present that bouquet of flowers to the person and see the joy on their face.
+silence: 18.0
+ Think of other people you're close to. Bring them to mind one by one and pick each of them a bouquet of flowers from the garden of your heart. And present it to them nicely.
+silence: 61.0
+
+silence: 28.0
+ Think of your acquaintances, people like your neighbors and co-workers, people you see in stores and restaurants you frequent. Again, bring them to mind one by one and pick each of them a nice bouquet of flowers from the garden of your heart.
+silence: 104.0
+ Think of someone you find difficult and pick a nice bouquet of flowers for that person and give it to them nicely.
+silence: 14.0
+ Pick flowers from the garden of your heart to give to everyone in this room.
+silence: 8.0
+ and pick flowers to give to everyone here at Buddha House.
+silence: 9.0
+ You can peek flowers from the garden of your heart to give to everyone here in the village.
+silence: 13.0
+ If you look back into your heart, you'll notice the flower garden is actually quite a bit larger now than when you started. You could give flowers to everybody in Kimpton.
+silence: 2.0
+ to everyone in Bavaria.
+silence: 15.0
+ In fact, the garden of your heart is so large you can easily give flowers to everyone in Europe.
+silence: 13.0
+ The garden of your heart is huge. You can pick flowers to give to everyone on this planet.
+silence: 59.0
+ Now put your attention back on yourself, back in your own heart, and notice how much larger the flower garden has become.
+silence: 4.0
+ It's a funny thing about love. The more you give it away, the more you have.
+silence: 5.0
+ May all beings everywhere be happy.

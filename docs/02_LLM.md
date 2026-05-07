@@ -80,8 +80,8 @@ All tests use:
 |--------|-------|-------------|------------|---------|------------|--------|
 | **llama-cpp-2** | **5.8** | 1ms | 23.85s | Good | cmake, libclang-dev | **Tested** |
 | llama-gguf v0.14 | ~0.25 | — | 1.46s | Poor | protobuf-compiler | Tested |
-| OxiLLaMa | — | — | — | — | None | Pending |
-| OxiBonsai | — | — | — | — | None | Pending (Q4_0?) |
+| OxiLLaMa v0.1.3 | **CRASH** | — | 0.01s | — | None | OOM: 13.3 GB alloc on 8 GB |
+| OxiBonsai | **SKIP** | — | — | — | None | Q1_0 only — no Q4_0 support |
 | Candle | — | — | — | — | None | Pending |
 
 ### Analysis so far
@@ -94,6 +94,11 @@ to sampler implementation, not the model.
 Key question for remaining candidates: do any pure Rust engines match
 llama.cpp's ARM NEON performance? OxiLLaMa and OxiBonsai claim NEON
 support via Rust intrinsics — need to verify on this hardware.
+
+**OxiLLaMa (v0.1.3) crashed immediately** — tried to allocate 13.3 GB for
+a 1.9 GB model on 8 GB hardware. Does not use mmap like llama.cpp. This
+is a disqualifying issue for memory-constrained devices. Installed as
+release build via `cargo install oxillama-cli`.
 
 ---
 

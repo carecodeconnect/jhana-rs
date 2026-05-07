@@ -1,0 +1,43 @@
+ In order to begin, please put your attention on your breath for a few moments.
+silence: 6.0
+ Bye, bye.
+silence: 42.0
+ Imagine that in your heart is a lake, a lake of warm clear water in a really magnificent setting.
+silence: 2.0
+ Get a sense of this beautiful lake of warm clear water.
+silence: 2.0
+ and then go jump in the lake.
+silence: 2.0
+ and relax in this warm clear water in this supremely beautiful setting.
+silence: 13.0
+ Now think of someone that you're close to and have them come and join you in the lake.
+silence: 2.0
+ See the joy on their faces as they hang out in the warm, clear water in this beautiful setting. The lake of your heart.
+silence: 12.0
+ Think of other people you're close to. Bring them to mind one by one and have each of them come join you in the lake of your heart.
+silence: 138.0
+
+silence: 19.0
+ Think of your acquaintances. Bring them to mind one by one and have them join you in the warm clear water of the lake of your heart.
+silence: 3.0
+
+silence: 84.0
+ Think of someone you find difficult. It's a big lake. You can find a spot for that person too.
+silence: 10.0
+ And of course you want to invite everyone in this room to come to the lake of your heart.
+silence: 10.0
+ and everyone here at the retreat center.
+silence: 11.0
+ You can invite all the neighbors.
+silence: 7.0
+ In fact, this lake goes on and on. You can invite everyone in Bavaria.
+silence: 11.0
+ The lake of your heart is huge. There's room enough for everybody in Europe to come enjoy the warm, clear water of the lake of your heart.
+silence: 20.0
+ The lake of your heart just goes on and on and on. Everyone on this planet could take the day off and come enjoy themselves in the lake of your heart.
+silence: 2.0
+ Probably do the world a whole lot of good.
+silence: 45.0
+ Now put your attention back on yourself, hanging out in the lake of your heart, surrounded by the people you're closest to, enjoying the warm, clear water in this magnificent setting.
+silence: 7.0
+ May all beings everywhere be happy.

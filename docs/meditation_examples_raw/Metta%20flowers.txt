@@ -1,0 +1,45 @@
+
+silence: 16.0
+ Imagine that in your heart is a very large, beautiful flower garden.
+silence: 2.0
+ flower garden full of most exquisite flower.
+silence: 6.0
+ The true riot of college.
+silence: 3.0
+ And then imagine that you go for a walk, a stroll through the garden of your heart, enjoying its beauty.
+silence: 34.0
+ Now think of someone that you care about and take a nice bouquet of beautiful flowers and present that bouquet to this person and see the joy on their face.
+silence: 43.0
+ Think of other people you're close to. Bring them to mind one by one and for each of them, make a nice bouquet of flowers and present it to them.
+silence: 152.0
+ Think of your acquaintances. Bring them to mind one by one and pick a nice bouquet of flowers for each of them.
+silence: 95.0
+ Think of someone you find difficult. Take a nice bouquet of flowers and present it nicely to them.
+silence: 12.0
+ Flowers for everyone in this room.
+silence: 8.0
+ Thank you for everyone here at Oakwood.
+silence: 9.0
+ It's a big flower garden. You can take flowers for all the neighbors around.
+silence: 10.0
+ In fact, if you look, you'll notice the flower garden is larger than when you started. You can pick flowers for everyone in the Midwest.
+silence: 8.0
+ You can see flowers for everyone in North America.
+silence: 9.0
+ Thank you.
+silence: 10.0
+ Flower garden is huge. There's enough flowers so that you can pick flowers for everybody on this planet.
+silence: 46.0
+ Now put your attention back on yourself, back in your heart, and notice how much greater the flower garden is. It's huge now.
+silence: 3.0
+ It's a funny thing about love. The more you give it away, the more you got.
+silence: 5.0
+ They all means everywhere.
+silence: 300.0
+ Thank you.
+silence: 5.0
+ Thank you.
+silence: 3.0
+ Thank you.
+silence: 10.0
+ you

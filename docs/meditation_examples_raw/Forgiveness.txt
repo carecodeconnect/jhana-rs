@@ -1,0 +1,93 @@
+ Please, put your attention on the breath for just a few moments.
+silence: 5.0
+
+silence: 15.0
+ Have forgiveness in your heart for anything that you think you've done wrong.
+silence: 19.0
+ Forgive yourself for all the old and past commissions and omissions.
+silence: 3.0
+ They're long gone.
+silence: 15.0
+ Understand that you are a different person and this one is for giving that one that you were.
+silence: 22.0
+ Feel that forgiveness filling you, enveloping you with a sense of warmth and ease.
+silence: 35.0
+ Think of your parents.
+silence: 4.0
+ Forgive them for anything that you have ever blamed them for.
+silence: 13.0
+ Understand that they too are different now, are changing.
+silence: 6.0
+ That is forgiveness.
+silence: 6.0
+ Fill them. Surround them.
+silence: 2.0
+ Knowing in your heart that this is your most wonderful way of togetherness.
+silence: 31.0
+ Think of your nearest and dearest people.
+silence: 3.0
+ Forgive them for anything that you think they have done wrong.
+silence: 2.0
+ We're doing wrong at this time.
+silence: 4.0
+ Fill them with your forgiveness.
+silence: 6.0
+ Let them feel that you accept.
+silence: 3.0
+ Let that forgiveness fill them.
+silence: 2.0
+ realizing that this is your expression of love.
+silence: 42.0
+ No, think of your friends.
+silence: 8.0
+ Forgive them for anything that you've disliked about them.
+silence: 3.0
+ Let your forgiveness reach out to them so that they can be filled with it, embraced by it.
+silence: 56.0
+ Think of the people you know, whoever they might be, and forgive them all for whatever it is that you have blamed them for, that you have judged them for, that you have disliked.
+silence: 11.0
+ Let your forgiveness fill their hearts. Surround them. Envelop them.
+silence: 9.0
+ Let forgiveness be your expression of love for them.
+silence: 51.0
+ Now, think of any special person whom you really need to forgive, to whom you still have resentment, rejection, or dislike.
+silence: 3.0
+ Forgive them fully.
+silence: 4.0
+ Remember that everyone has dukkha.
+silence: 5.0
+ Everyone.
+silence: 2.0
+ as suffering.
+silence: 3.0
+ Let this forgiveness come from your heart.
+silence: 2.0
+ Reach out to that person completely.
+silence: 2.0
+ and totally.
+silence: 33.0
+ Think of any person, any situation, or any group of people whom you're condemning, blaming, disliking.
+silence: 3.0
+ Forgive them completely.
+silence: 5.0
+ Let your forgiveness be your expression of unconditional love.
+silence: 4.0
+ They may not do the right things.
+silence: 2.0
+ But human beings have dukkha, suffering.
+silence: 2.0
+ And your heart needs the forgiveness.
+silence: 2.0
+ In order to have the purity of love
+silence: 61.0
+ Have a look again and see whether there's anyone or anything anywhere in the world to whom you have blame or condemnation.
+silence: 2.0
+ Forgive the people with a person.
+silence: 2.0
+ so that there's no separation in your heart.
+silence: 17.0
+ Now, put your attention back on yourself.
+silence: 5.0
+ Recognize the goodness in you.
+silence: 3.0
+ Recognize the effort.

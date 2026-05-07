@@ -60,6 +60,7 @@ Model on device needs replacing: GGML v3 format is deprecated, must use GGUF.
 - [ ] Download Orca Mini 3B GGUF (~2 GB) to replace old GGML v3 model
 - [ ] Load GGUF model on Rock, verify it loads
 - [ ] Configure inference params (top_k=40, top_p=0.95, temp=0.25, repeat_penalty=1.1)
+- [ ] Clean meditation examples (docs/meditation_examples_raw/) into system/user prompts
 - [ ] System prompt for meditation guide with [pause] markers
 - [ ] Streaming token output via crossbeam channel
 - [ ] Sentence-level buffering (accumulate tokens until sentence boundary)
