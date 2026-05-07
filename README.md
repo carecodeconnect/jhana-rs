@@ -36,7 +36,7 @@ aarch64). No internet required.
 
 OS-level packages:
 ```bash
-sudo apt install build-essential cmake pkg-config libasound2-dev rsync console-setup
+sudo apt install build-essential cmake pkg-config libasound2-dev rsync console-setup libclang-dev protobuf-compiler
 ```
 
 Rust toolchain:
@@ -67,6 +67,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 | `libasound2-dev` | Rock | ALSA audio headers (cpal) |
 | `rsync` | Both | Incremental file sync between x61s and Rock |
 | `console-setup` | Rock | Console font configuration for 720x1280 display |
+| `libclang-dev` | Rock | bindgen FFI generation for llama-cpp-2 (llama.cpp) |
+| `protobuf-compiler` | Rock | protobuf compilation for llama-gguf (ONNX proto) |
 | `dnsmasq` | X61s | DHCP server for direct ethernet link to Rock |
 | `sshpass` | X61s | Non-interactive SSH password for scripts |
 

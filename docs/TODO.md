@@ -44,14 +44,19 @@ within 3s of prompt.
 - [x] Sentence-by-sentence reveal (not all at once)
 - [ ] Pause marker countdown timer in TUI (scaffolded, activates with LLM)
 
-## 2. LLM Integration (llama-cpp-rs)
+## 2. LLM Integration
 
-Model on device: `/home/ubuntu/ai_in_a_box/downloaded/orca-mini-3b.ggmlv3.q4_0.bin` (1.8 GB)
+Model on device needs replacing: GGML v3 format is deprecated, must use GGUF.
 
-- [ ] Add llama-cpp-rs dependency to Cargo.toml
-- [ ] Verify llama-cpp-rs builds on aarch64 (Risk: C++ cross-dep)
-- [ ] Create `src/llm.rs` module
-- [ ] Load Orca Mini 3B Q4_0 model
+- [x] Create `src/llm.rs` module with ChunkParser and LlmOutput types
+- [x] Implement bracket state machine for pause marker parsing
+- [x] Unit tests for pause parsing
+- [x] Build llama-cpp-2 on Rock (C++ wrapper — needs libclang-dev)
+- [x] Build llama-gguf on Rock (pure Rust — needs protobuf-compiler)
+- [ ] Download Orca Mini 3B GGUF (~2 GB) to Rock
+- [ ] Benchmark both crates: tokens/sec on same model, compare
+- [ ] Download Orca Mini 3B GGUF (~2 GB) to replace old GGML v3 model
+- [ ] Load GGUF model on Rock, verify it loads
 - [ ] Configure inference params (top_k=40, top_p=0.95, temp=0.25, repeat_penalty=1.1)
 - [ ] System prompt for meditation guide with [pause] markers
 - [ ] Streaming token output via crossbeam channel
@@ -66,7 +71,20 @@ Model on device: `/home/ubuntu/ai_in_a_box/downloaded/orca-mini-3b.ggmlv3.q4_0.b
 - [ ] Tests for sentence buffering and pause marker parsing
 - [ ] Rustdoc for llm module
 
-## 3. TTS Integration (Piper CLI)
+## 3. Audio & TTS Integration
+
+### Speaker test (after LLM works)
+
+4 audio devices on Rock (no Bluetooth):
+- Card 2: Uctronics onboard speaker + mic (AI in a Box hardware)
+- Card 1: 3.5mm headphone/line out (rockchip-es8316)
+- Cards 0,3: HDMI audio out
+
+- [ ] Test onboard speaker: `aplay -D hw:2,0 test.wav`
+- [ ] Test 3.5mm jack: `aplay -D hw:1,0 test.wav`
+- [ ] Verify Piper TTS outputs playable WAV: `echo "test" | piper --model ... --output_file test.wav`
+
+### TTS integration (Piper CLI)
 
 Piper installed: `/usr/local/bin/piper`
 Model on device: `/home/ubuntu/ai_in_a_box/downloaded/en_US-lessac-low.onnx` (61 MB)

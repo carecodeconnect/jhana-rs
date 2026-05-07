@@ -10,6 +10,8 @@
 //! Hardware buttons: BACK=quit, ENTER=start, UP/DOWN=scroll.
 
 mod gpio;
+#[allow(dead_code)] // LLM module not yet wired to main — used in tests
+mod llm;
 mod ui;
 
 use std::io;

@@ -23,11 +23,24 @@ connection.
 | GPU | Mali (not used for inference) |
 | OS | Ubuntu 22.04.3 LTS, kernel 5.10.110-102-rockchip |
 | Arch | aarch64 |
-| Audio HW | Uctronics onboard mic + speaker; optional USB audio |
+| Audio HW | See audio devices table below |
+| Bluetooth | None |
 | Display | 720x1280 portrait |
 | GPIO | Buttons on GPIO 63 (up), 43 (down), 139 (enter), 138 (back) |
 | Serial | `/dev/ttyS6` at 115200 baud |
 | Network | Ethernet only; no internet in normal operation |
+
+### Audio Devices (verified 2026-05-07)
+
+| Card | ALSA Name | Type | Use |
+|------|-----------|------|-----|
+| 0 | `rockchip-hdmi1` | HDMI SPDIF out | External speaker via HDMI |
+| 1 | `rockchip-es8316` | Onboard codec | 3.5mm headphone/line out + mic |
+| 2 | `uctronics-codec` | Uctronics board | Onboard speaker + mic (AI in a Box) |
+| 3 | `rockchip-hdmi0` | HDMI I2S out | External speaker via HDMI |
+
+No Bluetooth. For TTS playback, use card 2 (Uctronics onboard speaker) or
+card 1 (3.5mm jack for external speaker). USB audio devices also work.
 
 ### Storage Plan
 

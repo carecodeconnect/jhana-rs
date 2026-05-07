@@ -11,9 +11,13 @@ crossterm = "0.28"
 log = "0.4"
 simplelog = "0.12"
 signal-hook = "0.3"
+llama-cpp-2 = "0.1"
+llama-gguf = "0.14"
 
 [lints.rust]
-unsafe_code = "forbid"
+# unsafe_code relaxed from "forbid" to "warn" because llama-cpp-2 requires
+# unsafe FFI calls to the underlying llama.cpp C++ library.
+unsafe_code = "warn"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
