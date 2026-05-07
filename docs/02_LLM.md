@@ -100,6 +100,18 @@ All tests use:
 | **llama-cpp-2** | **11.8** | 1ms | 1.61s | Good | Tested |
 | **Candle v0.10.2** | **8.72** | — | 0.14s | Good | Tested, NEON works |
 
+#### Ministral 3B Instruct Q4_K_M (2.0 GB, Mistral family)
+
+| Engine | tok/s | First token | Model load | Quality | Status |
+|--------|-------|-------------|------------|---------|--------|
+| llama-cpp-2 | **1.0** | 5ms | 5.01s | **Excellent** | Tested |
+
+Ministral 3B produced **[N] pause markers natively** without any fine-tuning
+or few-shot examples — the only model to do so. The tone and style of the
+Mistral family is an excellent fit for a meditation guide. However, at 1.0
+tok/s on the Rock 5A, it's below the 2.5 tok/s target (3.4B params is too
+large for this hardware at real-time speed).
+
 ### Analysis so far
 
 llama-cpp-2 is 23x faster than llama-gguf on this hardware due to
@@ -139,11 +151,23 @@ same model (35% faster).
 
 All three exceed the 2.5 tok/s target by 3-4x.
 
-### Pure Rust engines ruled out
+### Additional candidates (testing)
+
+- **[crabml](https://github.com/crabml/crabml)**: Pure Rust, explicit
+  ARM NEON via RUSTFLAGS, GGUF support. Building on Rock.
+- **[mistral.rs](https://github.com/EricLBuehler/mistral.rs)**: Fast
+  flexible inference, GGUF + many quant formats, auto-detects arch.
+  Building on Rock. Testing with Ministral 3B (smallest Mistral model).
+- **[oxide-rs](https://github.com/theawakener0/oxide-rs)**: Pure Rust,
+  CPU-focused, GGUF. To test.
+
+### Ruled out
 
 - **llama-gguf**: 23x slower than llama-cpp-2 (no effective ARM NEON)
 - **OxiLLaMa**: OOM crash (no mmap, tried 13.3 GB on 8 GB device)
 - **OxiBonsai**: Q1_0 only, doesn't support Q4_0/Q4_K_M
+- **Crane**: No clear GGUF Q4 quantization support, requires full model
+  weights. Build from source only (no cargo install).
 
 ---
 

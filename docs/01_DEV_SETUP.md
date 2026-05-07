@@ -218,13 +218,34 @@ it's too slow and the wrong architecture.
 Use your preferred terminal editor (vim, nano, helix) over SSH. This avoids
 the sync step but is less comfortable for large edits.
 
-### Give the Rock internet access (NAT forwarding)
+### Give the Rock internet access
 
-The Rock has no internet by default -- it's on a direct ethernet link to the
-X61s. To install packages or pull from git, forward the X61s wifi connection.
+#### Option A: Direct router ethernet (preferred for downloads)
+
+Plug the Rock directly into the router via ethernet. Gets DHCP IP
+`192.168.1.102` (hostname `rock-5a`). Download speed ~12 MB/s.
+
+Must remove the X61s static IP and stop dnsmasq first:
+```bash
+# On X61s
+sudo ip addr del 192.168.1.1/24 dev enp0s25
+# Kill dnsmasq in its terminal (ctrl+c)
+```
+
+SSH still works at the same IP since the router assigns `192.168.1.102`.
+
+#### Option B: NAT forwarding via X61s (for direct ethernet dev)
+
+When the Rock is connected directly to the X61s via ethernet (no router),
+forward the X61s wifi connection. Download speed ~1 MB/s.
 
 On the X61s (one-time, until reboot):
 ```bash
+sudo ip addr add 192.168.1.1/24 dev enp0s25
+# In a separate terminal:
+sudo dnsmasq --no-daemon --interface=enp0s25 \
+  --dhcp-range=192.168.1.100,192.168.1.200,12h --bind-interfaces
+
 sudo sysctl -w net.ipv4.ip_forward=1
 sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
 sudo iptables -A FORWARD -i enp0s25 -o wlan0 -j ACCEPT
@@ -236,14 +257,6 @@ On the Rock (via SSH):
 sudo ip route add default via 192.168.1.1
 echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf
 ```
-
-Verify:
-```bash
-ping -c 1 8.8.8.8
-```
-
-Confirmed working 2026-05-07. The X61s wifi interface is `wlan0`, ethernet
-to Rock is `enp0s25`.
 
 ### Alternative: git-based workflow
 
