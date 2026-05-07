@@ -11,6 +11,7 @@
 
 mod gpio;
 mod llm;
+mod tts;
 mod ui;
 
 use std::io;
@@ -54,6 +55,9 @@ fn main() -> io::Result<()> {
     // LLM output channel — background streaming thread sends here
     let (llm_tx, llm_rx) = mpsc::channel::<LlmOutput>();
 
+    // TTS background thread — receives sentences to speak aloud
+    let tts_tx = tts::start();
+
     // Signal handling — SIGTERM/SIGINT set this flag to quit the event loop
     let quit = Arc::new(AtomicBool::new(false));
     let quit_signal = Arc::clone(&quit);
@@ -78,6 +82,7 @@ fn main() -> io::Result<()> {
         button_rx.as_ref(),
         &llm_tx,
         &llm_rx,
+        &tts_tx,
     );
 
     // Cleanup — always restore terminal state
@@ -105,6 +110,7 @@ fn run_loop(
     button_rx: Option<&mpsc::Receiver<ButtonEvent>>,
     llm_tx: &mpsc::Sender<LlmOutput>,
     llm_rx: &mpsc::Receiver<LlmOutput>,
+    tts_tx: &mpsc::Sender<tts::TtsCommand>,
 ) -> io::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, app))?;
@@ -134,6 +140,8 @@ fn run_loop(
                 LlmOutput::Sentence(s) => {
                     info!("sentence: {s}");
                     app.token_count += estimate_tokens(&s);
+                    // Send to TTS thread for spoken output
+                    let _ = tts_tx.send(tts::TtsCommand::Speak(s.clone()));
                     app.push_sentence(s);
                 }
                 LlmOutput::Pause(n) => {

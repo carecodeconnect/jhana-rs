@@ -87,9 +87,11 @@ jhana-rs connects via minreq (pure Rust HTTP), parses SSE streaming tokens.
 - Card 1: 3.5mm headphone/line out (rockchip-es8316)
 - Cards 0,3: HDMI audio out
 
-- [ ] Test onboard speaker: `aplay -D hw:2,0 test.wav`
-- [ ] Test 3.5mm jack: `aplay -D hw:1,0 test.wav`
-- [ ] Verify Piper TTS outputs playable WAV: `echo "test" | piper --model ... --output_file test.wav`
+- [x] Test onboard speaker: `aplay -D plughw:2,0 test.wav` (needs plughw for mono->stereo)
+- [x] Test 3.5mm jack: `aplay -D plughw:1,0 test.wav`
+- [x] Verify Piper TTS outputs playable WAV (16-bit mono 44100 Hz)
+- [x] Volume control: `amixer -c 2 sset DAC N` (0-4, default 3=75%, 1=25% good)
+- [x] Speech rate: `--length_scale 1.5` for calm meditation pace
 
 ### TTS integration (Piper CLI)
 
