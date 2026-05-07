@@ -13,88 +13,87 @@ in GGUF on HuggingFace.
 
 ---
 
-## Rust Binding Strategy
+## Inference Engine Benchmark
 
-### Approach 1: llama-cpp-2 (C++ wrapper)
+Systematic comparison of Rust LLM inference engines on Rock 5A (RK3588S,
+Cortex-A76/A55, 8 GB RAM, aarch64). Minimum viable: >2.5 tok/s (faster
+than spoken speech for TTS pipeline).
 
-Wraps the battle-tested llama.cpp C/C++ library via FFI. Proven ARM NEON
-SIMD optimizations. Broad model architecture support.
+### Test protocol
 
-- Crate: [llama-cpp-2](https://crates.io/crates/llama-cpp-2)
-- Pros: Proven on aarch64, NEON optimized, supports all GGUF models
-- Cons: C++ build dependency (cmake, build-essential), unsafe FFI,
-  large compile time on Rock (~10-20 min first build)
-- Risk: C++ compilation on aarch64 may fail (mitigation: see Approach 2)
+All tests use:
+- **Model**: Orca Mini 3B Q4_0 GGUF (`q4_0-orca-mini-3b.gguf`, 1.9 GB)
+- **Prompt**: Meditation guide prompt (37 tokens)
+- **Max tokens**: 100
+- **Hardware**: Rock 5A (RK3588S), debug build
+- **Sampling**: temp=0.25, top_k=40, top_p=0.95
 
-### Approach 2: llama-gguf (pure Rust)
+### Candidates
 
-Pure Rust implementation of llama.cpp with full GGUF support. No C++
-dependency. Must be tested head-to-head with llama-cpp-2 on the Rock.
+#### 1. llama-cpp-2 (C++ wrapper) — BASELINE
 
-- Crate: [llama-gguf](https://crates.io/crates/llama-gguf)
-- Source: [github.com/Lexmata/llama-gguf](https://github.com/Lexmata/llama-gguf)
-- Pros: No C++ deps, simpler build, pure Rust, cleaner dependency chain
-- Cons: Newer/less proven, SIMD support may be partial on ARM,
-  model architecture coverage may lag behind llama.cpp
-- Plan: Benchmark tokens/sec against llama-cpp-2 on same GGUF model
+- Crate: [llama-cpp-2](https://crates.io/crates/llama-cpp-2) v0.1.146
+- Approach: Rust FFI bindings to llama.cpp C/C++
+- ARM NEON: Yes (hand-tuned assembly in llama.cpp)
+- GGUF: Yes (all formats)
+- Model support: All llama.cpp architectures
+- Build deps: cmake, build-essential, libclang-dev
 
----
+#### 2. llama-gguf (pure Rust)
 
-## Build Results (2026-05-07)
+- Crate: [llama-gguf](https://crates.io/crates/llama-gguf) v0.14.0
+- Approach: Pure Rust reimplementation of llama.cpp
+- ARM NEON: Claims support but not effective in benchmark
+- GGUF: Yes (all formats)
+- Build deps: protobuf-compiler
 
-Both crates build successfully on Rock 5A (aarch64):
+#### 3. OxiLLaMa (pure Rust, COOLJAPAN ecosystem)
 
-| Crate | Build result | Extra deps needed |
-|-------|-------------|-------------------|
-| llama-cpp-2 v0.1.146 | OK | `libclang-dev` (bindgen) |
-| llama-gguf v0.14.0 | OK | `protobuf-compiler` (ONNX proto) |
+- Source: [github.com/cool-japan/oxillama](https://github.com/cool-japan/oxillama)
+- Approach: Pure Rust reimpl built on SciRS2/OxiBLAS/OxiFFT
+- ARM NEON: Via OxiBLAS (Rust BLAS implementation)
+- GGUF: Yes — all formats including Q4_0, K-quants, Q1_0_G128
+- Model support: Llama, Qwen3, Mistral, Gemma, Phi, Command-R
+- Build deps: None (pure Rust). Not on crates.io — git dependency.
 
-llama-cpp-2 compiled the full llama.cpp C++ library from source on the
-Cortex-A76 cores. First build ~5 min, subsequent builds cached.
+#### 4. OxiBonsai (pure Rust, 1-bit specialist)
 
-### Inference benchmark (2026-05-07)
+- Source: [OxiBonsai](https://kitasanio.medium.com/oxibonsai-the-worlds-first-pure-rust-1-bit-llm-inference-engine-4c15abf53fce) (Apr 2026)
+- Approach: Pure Rust, zero-FFI, targets 80-85% of llama.cpp throughput
+- ARM NEON: Yes (core::arch intrinsics, runtime CPU detection)
+- GGUF: Q1_0_G128 focus (1-bit quantization)
+- Notes: 1-bit only — may not support Q4_0. Skip if Q4_0 unsupported.
 
-Model: Orca Mini 3B Q4_0 GGUF (1.9 GB) via llama-cpp-2.
+#### 5. Candle (HuggingFace, pure Rust ML framework)
 
-| Metric | Value |
-|--------|-------|
-| Tokens/sec | **5.8** |
-| Time to first token | 1ms |
-| Model load time | 23.85s |
-| Tokens generated | 100 |
-| Generation time | 17.11s |
-| Model RAM (mmap) | ~1.9 GB |
-| KV cache | 650 MB |
+- Crate: [candle-core](https://crates.io/crates/candle-core)
+- Source: [github.com/huggingface/candle](https://github.com/huggingface/candle)
+- Approach: General ML framework, not llama.cpp specific
+- ARM NEON: Via candle's SIMD backend
+- GGUF: Via candle-transformers quantized model support
+- Notes: Requires model-specific Rust code. More complex integration
+  but very active (HuggingFace maintained).
 
-5.8 tok/s exceeds the 2.5 tok/s target. Faster than spoken speech, so
-TTS pipeline will keep up. Flash Attention auto-enabled.
+### Results
 
-Note: Orca Mini 3B did not produce `[pause]` markers with the basic
-prompt — it's not fine-tuned for that. Options:
-1. More aggressive few-shot prompting
-2. Use a better instruction-following model (Qwen3-4B, Llama 3.2 3B)
-3. Fine-tune a small model with pause markers (like jhana-mistral)
+| Engine | tok/s | First token | Model load | Quality | Build deps | Status |
+|--------|-------|-------------|------------|---------|------------|--------|
+| **llama-cpp-2** | **5.8** | 1ms | 23.85s | Good | cmake, libclang-dev | **Tested** |
+| llama-gguf v0.14 | ~0.25 | — | 1.46s | Poor | protobuf-compiler | Tested |
+| OxiLLaMa | — | — | — | — | None | Pending |
+| OxiBonsai | — | — | — | — | None | Pending (Q4_0?) |
+| Candle | — | — | — | — | None | Pending |
 
-### Head-to-head: llama-cpp-2 vs llama-gguf (2026-05-07)
+### Analysis so far
 
-Same model (Orca Mini 3B Q4_0 GGUF), same prompt, 100 token limit.
+llama-cpp-2 is 23x faster than llama-gguf on this hardware due to
+hand-tuned ARM NEON SIMD in the C++ llama.cpp library. The llama-gguf
+output quality difference (academic vs meditation text) is likely due
+to sampler implementation, not the model.
 
-| Metric | llama-cpp-2 (C++) | llama-gguf (pure Rust) |
-|--------|-------------------|------------------------|
-| **Tokens/sec** | **5.8** | **~0.25** |
-| Model load time | 23.85s | 1.46s |
-| Output quality | Meditation text (on-topic) | Academic text (off-topic) |
-| ARM NEON SIMD | Yes (hand-tuned asm) | No |
-
-**Decision: use llama-cpp-2.** The 23x inference speed advantage is
-decisive. llama-gguf's faster model load (16x) doesn't compensate —
-generation speed is what matters for real-time streaming to TTS.
-
-The llama-gguf output quality difference is likely due to sampler
-implementation differences, not the model itself. But inference speed
-alone disqualifies it on this hardware.
-
-llama-gguf may become viable if/when it adds ARM NEON SIMD support.
+Key question for remaining candidates: do any pure Rust engines match
+llama.cpp's ARM NEON performance? OxiLLaMa and OxiBonsai claim NEON
+support via Rust intrinsics — need to verify on this hardware.
 
 ---
 
