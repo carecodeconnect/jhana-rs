@@ -108,9 +108,19 @@ All tests use:
 
 Ministral 3B produced **[N] pause markers natively** without any fine-tuning
 or few-shot examples — the only model to do so. The tone and style of the
-Mistral family is an excellent fit for a meditation guide. However, at 1.0
-tok/s on the Rock 5A, it's below the 2.5 tok/s target (3.4B params is too
-large for this hardware at real-time speed).
+Mistral family is an excellent fit for a meditation guide.
+
+At 1.0 tok/s, this model is below the original 2.5 tok/s target. However,
+**the meditation use case is naturally slow-paced:**
+- Pause markers (`[5]`, `[10]`) insert 5-10s of silence between sentences
+- TTS playback of each sentence takes 2-5s
+- The user is meditating, not reading — they don't see raw generation speed
+- The model only needs to stay ahead of the TTS+pause pipeline, not real-time
+
+A typical meditation sentence is ~15 tokens. At 1.0 tok/s that's 15s to
+generate, but TTS playback + pauses of the previous sentences may take
+20-30s. So Ministral 3B may be **fast enough in practice** despite the
+raw benchmark number. Needs end-to-end pipeline testing to confirm.
 
 ### Analysis so far
 
