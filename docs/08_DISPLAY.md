@@ -132,9 +132,32 @@ The BananaPi LHR050H41 init (also ILI9881C, 720x1280) was tested —
 DSI connects, backlight brighter, but no image. The Uctronics panel
 needs its own specific init sequence.
 
-**Next step:** Fork `panel-ilitek-ili9881c.c`, add the extracted init
-sequence as a new panel entry with `uctronics,uctronics-lcd` compatible,
-compile as kernel module, install on Armbian, test.
+## Testing log (2026-05-08)
+
+| Overlay | Panel driver | Compatible | Backlight | DSI | Text | Boot |
+|---------|-------------|-----------|-----------|-----|------|------|
+| stock 8HD | panel-radxa-display-8hd | radxa,display-8hd | Bright | 800x1280 | **No** | Fast |
+| patched 8HD | panel-ilitek-ili9881c (stock) | bananapi,lhr050h41 | Brighter | 720x1280 | **No** | 4 min |
+| patched 8HD | panel-ilitek-ili9881c (ours) | uctronics,uctronics-lcd | Dim | 720x1280 | **No** | Fast |
+| custom overlay | panel-uctronics-lcd (minimal) | uctronics,uctronics-lcd | None | 720x1280 | **No** | Fast |
+
+**Conclusion:** Backlight and DSI connection work, but no panel driver
+produces visible pixels. The ILI9881C init sequence extracted from the
+kernel binary may be incomplete or at the wrong offset. The panel IC
+is confirmed as ILI9881C but the exact register init is critical — even
+one wrong value in the GIP timing (page 2) prevents display output.
+
+**Next steps:**
+1. **Re-extract the init sequence more carefully** — the current extraction
+   used a heuristic offset that may have missed commands or included stale
+   data from an adjacent panel driver.
+2. **Alternative: DSI bus sniffing** — boot the old image, use the kernel's
+   DSI debug interface or `/dev/mem` to capture the actual DSI commands
+   sent during panel init. This gives the exact byte stream.
+3. **Alternative: disassemble the probe function** — use `objdump` on the
+   old kernel to trace the init function and find the exact data pointer.
+4. **Alternative: contact Arducam/Uctronics** — request the panel driver
+   source or at minimum the panel IC datasheet with the init sequence.
 
 ## Kernel symbols from old image
 
