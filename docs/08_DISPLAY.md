@@ -103,6 +103,22 @@ image can be downloaded from:
 An unanswered GitHub issue exists:
 [usefulsensors/ai_in_a_box#6](https://github.com/usefulsensors/ai_in_a_box/issues/6)
 
+## Panel IC identified: ILI9881C (2026-05-08)
+
+The panel controller is an **ILI9881C** — confirmed by finding ILI9881
+page-switching commands (`98 81 03`, `98 81 04`, `98 81 01`, `98 81 00`)
+in the old kernel binary near the uctronics driver data.
+
+The Armbian kernel already has `panel-ilitek-ili9881c.ko` which supports
+720x1280 panels via the `bananapi,lhr050h41` compatible string. The init
+sequence will differ from the BananaPi panel but the basic ILI9881C
+protocol is the same.
+
+**Next step:** Try the BananaPi LHR050H41 compatible in the overlay —
+the ILI9881C init may be close enough to get pixels on screen, even if
+colours or orientation are slightly off. If not, extract the full init
+sequence from the old kernel and add a new panel entry to the driver.
+
 ## Kernel symbols from old image
 
 ```
