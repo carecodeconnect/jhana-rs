@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Pre-commit hook: run rustfmt and clippy on staged .rs files
-# Fails the commit if either produces errors.
+# Pre-commit hook: run rustfmt on staged .rs files.
+# Clippy is NOT run here — sensevoice-rs has C++ deps that only compile
+# on aarch64 (Rock 5A). Clippy runs on the Rock via scripts/rock-build.sh.
 #
 # Install: cp scripts/pre-commit .git/hooks/pre-commit
 
@@ -19,11 +20,4 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "pre-commit: running clippy..."
-cargo clippy -- -D warnings
-if [ $? -ne 0 ]; then
-    echo "clippy failed. Fix the warnings above before committing."
-    exit 1
-fi
-
-echo "pre-commit: all checks passed."
+echo "pre-commit: rustfmt passed. (clippy runs on Rock via rock-build.sh)"
