@@ -369,17 +369,19 @@ workloads.
       **Current status:** Armbian overlay reverted to `rock-5a-radxa-display-8hd`
       (backlight on, no image, fast boot). ILI9881C with BananaPi init causes
       4-minute boot delay from DSI retries.
+      **Init sequence extracted** (2026-05-08): 188 register writes, 5 pages.
+      Saved at `hardware/uctronics-dsi/ili9881c-init-sequence.c`.
       **Next steps:**
-      1. Boot old image (backup microSD)
-      2. Extract full ILI9881C init command array from old kernel binary
-         — data is near offset 16400696 in vmlinuz, structured as
-         ILI9881 page commands (`98 81 XX`) + register writes
-      3. Fork `panel-ilitek-ili9881c.c` from Armbian kernel source
-      4. Add new panel entry with `uctronics,uctronics-lcd` compatible
-         and the extracted init sequence
-      5. Compile as out-of-tree kernel module on Armbian
-      6. Patch 8HD overlay DTS to use `uctronics,uctronics-lcd` compatible
-      7. Install module + overlay, reboot, test
+      1. Swap Armbian microSD into Rock, boot, SSH in
+      2. Download `panel-ilitek-ili9881c.c` from Armbian kernel source
+         (github.com/armbian/linux-rockchip, branch 6.1)
+      3. Add `uctronics_lcd_init[]` from `ili9881c-init-sequence.c` as
+         a new panel entry with `uctronics,uctronics-lcd` compatible
+      4. Add mode struct with 720x1280p60 timing (66 MHz, H:40/20/55, V:15/8/15)
+      5. Compile as out-of-tree kernel module (`make -C /lib/modules/.../build M=...`)
+      6. Patch 8HD overlay DTS: change compatible to `uctronics,uctronics-lcd`
+      7. Install module + overlay, reboot, test display
+      8. If working: add module to `/etc/modules-load.d/` for auto-load
       Kernel headers already installed on Armbian (`linux-headers-vendor-rk35xx`).
       Makefile and build infra in `hardware/uctronics-dsi/`.
 
@@ -790,6 +792,15 @@ Prepare jhana-rs for publication as a Rust crate on crates.io.
 | Silero VAD | `/home/ubuntu/ai_in_a_box/downloaded/snakers4_silero-vad_master/` | ~2 MB | Phase 2 VAD |
 
 ---
+
+## Documentation
+
+- [ ] **Explain the "cyberbox" concept in README or docs** — the Uctronics
+      AI in a Box hardware is a "cyberbox": a self-contained, offline,
+      single-purpose AI device. Cite the source of the cyberbox idea and
+      how jhana-rs transforms it from a captioning device into a meditation
+      guide. Document the vision: a dedicated physical object for meditation,
+      not an app on a phone/laptop.
 
 ## Cross-project documentation
 
