@@ -147,17 +147,35 @@ kernel binary may be incomplete or at the wrong offset. The panel IC
 is confirmed as ILI9881C but the exact register init is critical — even
 one wrong value in the GIP timing (page 2) prevents display output.
 
-**Next steps:**
-1. **Re-extract the init sequence more carefully** — the current extraction
-   used a heuristic offset that may have missed commands or included stale
-   data from an adjacent panel driver.
-2. **Alternative: DSI bus sniffing** — boot the old image, use the kernel's
-   DSI debug interface or `/dev/mem` to capture the actual DSI commands
-   sent during panel init. This gives the exact byte stream.
-3. **Alternative: disassemble the probe function** — use `objdump` on the
-   old kernel to trace the init function and find the exact data pointer.
-4. **Alternative: contact Arducam/Uctronics** — request the panel driver
-   source or at minimum the panel IC datasheet with the init sequence.
+**Root cause:** The extracted init sequence is wrong. The ILI9881C page
+switch bytes found near the uctronics strings were likely from the
+`drm_panel_desc` struct metadata, not the actual init command array.
+The panel powers on (GPIO 132 high after fixing vdd regulator) and
+backlight works (PWM running) but the ILI9881C controller is not
+configured to accept video data — framebuffer writes to `/dev/fb0`
+produce no visible output.
+
+**Next steps (priority order):**
+1. **Disassemble the probe function** — boot old image, use `objdump`
+   to disassemble `uctronics_display_probe` (at ffffffc010e37494) and
+   trace the init array pointer. The function loads the init data via
+   `adrp`/`add` instructions that encode the exact offset.
+2. **DSI bus sniffing** — use `/dev/mem` to read the DSI controller's
+   TX FIFO registers during panel init on the old image, capturing
+   the exact byte stream sent to the panel.
+3. **Contact Arducam/Uctronics** — request the panel driver source
+   or the panel IC datasheet with the init sequence. File an issue
+   at [github.com/ArduCAM/RK_Kernel](https://github.com/ArduCAM/RK_Kernel).
+4. **Download the baseline image** (2.5 GB from storage.googleapis.com)
+   and extract the driver from it — may have source in `/usr/src/`.
+
+**What works so far:**
+- Stock 8HD overlay correctly enables DSI subsystem (PHY, VOP routing, pinctrl)
+- Our forked ILI9881C driver compiles and loads as `panel-radxa-display-8hd.ko`
+- Panel power (GPIO 132) and backlight (GPIO 122 + PWM10) are working
+- DSI link is active at 720x1280p60, 66 MHz, 480 Mbps x 4 lanes
+- Console framebuffer switches to 90x80 character mode
+- Only missing: correct ILI9881C register init sequence
 
 ## Kernel symbols from old image
 

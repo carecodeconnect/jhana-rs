@@ -1,4 +1,5 @@
-obj-m += panel-ilitek-ili9881c.o
+obj-m += panel-radxa-display-8hd.o
+panel-radxa-display-8hd-y := panel-ilitek-ili9881c.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
@@ -8,9 +9,4 @@ all:
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
-install: all
-	sudo cp panel-ilitek-ili9881c.ko /lib/modules/$(shell uname -r)/kernel/drivers/gpu/drm/panel/
-	sudo depmod -a
-	echo "panel-ilitek-ili9881c" | sudo tee /etc/modules-load.d/uctronics-panel.conf
-
-.PHONY: all clean install
+.PHONY: all clean

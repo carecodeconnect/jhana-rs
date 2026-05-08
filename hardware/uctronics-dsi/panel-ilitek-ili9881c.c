@@ -893,7 +893,7 @@ static int ili9881c_dsi_probe(struct mipi_dsi_device *dsi)
 	drm_panel_init(&ctx->panel, &dsi->dev, &ili9881c_funcs,
 		       DRM_MODE_CONNECTOR_DSI);
 
-	ctx->power = devm_regulator_get(&dsi->dev, "power");
+	ctx->power = devm_regulator_get(&dsi->dev, "vdd");
 	if (IS_ERR(ctx->power))
 		return dev_err_probe(&dsi->dev, PTR_ERR(ctx->power),
 				     "Couldn't get our power regulator\n");
@@ -1185,7 +1185,7 @@ static const struct ili9881c_desc w552946aba_desc = {
 static const struct of_device_id ili9881c_of_match[] = {
 	{ .compatible = "bananapi,lhr050h41", .data = &lhr050h41_desc },
 	{ .compatible = "feixin,k101-im2byl02", .data = &k101_im2byl02_desc },
-	{ .compatible = "uctronics,uctronics-lcd", .data = &uctronics_lcd_desc },
+	{ .compatible = "radxa,display-8hd", .data = &uctronics_lcd_desc },
 	{ .compatible = "wanchanglong,w552946aba", .data = &w552946aba_desc },
 	{ }
 };
