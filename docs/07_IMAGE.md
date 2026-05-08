@@ -79,9 +79,17 @@ Not recommended — dead project. Use Armbian instead.
 **Armbian 26.2.1, Ubuntu 24.04 Noble, vendor kernel 6.1.115, CLI minimal**
 
 - 269 MB download, lightweight, headless (no desktop — jhana-rs is a TUI)
-- RKNPU v0.9.8 included — RKLLM works out of the box
+- Vendor kernel 6.1.115 includes RKNPU driver (expected v0.9.8)
 - Ubuntu 24.04 LTS — supported until 2029
 - Actively maintained by Armbian community
+
+| Field | Value |
+|-------|-------|
+| Filename | `Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz` |
+| Download | <https://dl.armbian.com/rock-5a/Noble_vendor_minimal> |
+| SHA256 | `5ae0785a4f6e1421395a6b223328c2dac2b938263d8b5c001fb7d759245aca83` |
+| Compressed | 269 MB |
+| Verified | 2026-05-08, checksum matches |
 
 ---
 

@@ -4,7 +4,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+ROCK_IP="${ROCK_IP:-192.168.1.83}"
 sshpass -p 'ubunturock' rsync -avz --delete \
   --exclude target/ --exclude '.git/' --exclude 'jhana-rs.log' \
   -e "ssh -o StrictHostKeyChecking=no" \
-  "$PROJECT_DIR/" ubuntu@192.168.1.102:~/jhana-rs/
+  "$PROJECT_DIR/" ubuntu@"$ROCK_IP":~/jhana-rs/

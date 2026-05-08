@@ -34,9 +34,12 @@ aarch64). No internet required.
 
 ### Rock 5A (build target)
 
+OS: Armbian 26.2.1, Ubuntu 24.04 LTS Noble, kernel 6.1.115-vendor-rk35xx
+RKNPU driver: v0.9.8
+
 OS-level packages:
 ```bash
-sudo apt install build-essential cmake pkg-config libasound2-dev rsync console-setup libclang-dev protobuf-compiler ffmpeg
+sudo apt install build-essential cmake pkg-config libasound2-dev libssl-dev rsync console-setup libclang-dev ffmpeg
 ```
 
 Rust toolchain:
@@ -97,8 +100,8 @@ and build steps.
 | `libasound2-dev` | Rock | ALSA audio headers (cpal) |
 | `rsync` | Both | Incremental file sync between x61s and Rock |
 | `console-setup` | Rock | Console font configuration for 720x1280 display |
-| `libclang-dev` | Rock | bindgen FFI generation for llama-cpp-2 (llama.cpp) |
-| `protobuf-compiler` | Rock | protobuf compilation for llama-gguf (ONNX proto) |
+| `libssl-dev` | Rock | OpenSSL headers (hf-hub model downloads in sensevoice-rs) |
+| `libclang-dev` | Rock | bindgen FFI generation (sensevoice-rs, rkllm-rs) |
 | `ffmpeg` | Rock | Demo recording (framebuffer + audio capture) |
 | `dnsmasq` | X61s | DHCP server for direct ethernet link to Rock |
 | `sshpass` | X61s | Non-interactive SSH password for scripts |
