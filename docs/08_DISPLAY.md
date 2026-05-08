@@ -191,3 +191,27 @@ ffffffc011c71e58 d uctronics_display_driver
 
 The `dmesg` output also shows `arducam add mipi display test` during
 panel probe, suggesting the panel may be an Arducam-sourced component.
+
+## Panel IC correction: JD9365DA, NOT ILI9881C (2026-05-08)
+
+**Critical finding:** The Uctronics panel uses a **Jadard JD9365DA**
+controller, NOT ILI9881C. Evidence:
+
+1. The kernel string `"jadard-jd9365da\x00arducam add mipi display test"`
+   at offset 0x12cf947 in vmlinuz proves the "arducam" debug print is
+   inside the JD9365DA driver code.
+2. The `jadard_jd9365da_enable` function at 0x6df990 immediately follows
+   `uctronics_display_remove` at 0x6df7b4 in the same compilation unit.
+3. `CONFIG_DRM_PANEL_JADARD_JD9365DA_H3=y` in the old kernel config.
+
+The ILI9881C page-switch bytes (`98 81 XX`) found earlier were from a
+DIFFERENT driver in the same kernel — NOT the uctronics panel.
+
+**Armbian has `panel-jadard-jd9365da-h3.ko`** with two existing panels:
+- `chongzhou,cz101b4001` (800x1280)
+- `radxa,display-10hd-ad001`
+
+The init command format is simple: `{u8 reg, u8 val}` pairs sent via
+`mipi_dsi_dcs_write_buffer()`. The init sequence needs to be extracted
+from the old kernel's `jadard_jd9365da_enable` function (inlined at
+0x6df990, 109 `mipi_dsi_generic_write` calls).
