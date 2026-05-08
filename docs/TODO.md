@@ -360,6 +360,20 @@ workloads.
 - [ ] Download Piper model to new image (`~/models/vits-piper-en_US-lessac-medium/`)
 - [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
+- [ ] **Fix DSI display on Armbian image** — Uctronics panel not working.
+      The old Radxa image has a custom kernel panel driver `uctronics,uctronics-lcd`
+      (`CONFIG_DRM_PANEL_UCTRONICS_LCD=y`) baked into the kernel. The Armbian
+      vendor kernel 6.1.115 does not include this driver. The `rock-5a-radxa-display-8hd`
+      overlay uses a different panel (`radxa,display-8hd`, 800x1280) — wrong panel.
+      Full old device tree saved at `/tmp/rock-old-devicetree.dts` on X61s.
+      Options:
+      1. Build the Uctronics panel driver as a loadable kernel module for Armbian
+         — find source in Radxa's kernel tree (rockchip-linux/kernel), compile
+         against Armbian's 6.1.115 headers, load with `insmod`
+      2. Create a custom device tree overlay with a generic DSI panel driver
+         (`panel-dsi`) using the timing/init data from the old device tree
+      3. Use HDMI for display temporarily (plug in a monitor)
+      4. Work headless via SSH (display not needed for NPU testing)
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)

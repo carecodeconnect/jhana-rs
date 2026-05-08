@@ -88,6 +88,37 @@ opened to access it.
 The Uctronics AI in a Box has a 720x1280 portrait DSI display built into
 the enclosure. No HDMI monitor is connected.
 
+### Uctronics DSI panel driver
+
+The display uses a **custom kernel panel driver** (`uctronics,uctronics-lcd`)
+that is only present in the original Radxa Ubuntu 22.04 image. It is NOT
+available in Armbian or mainline kernels.
+
+| Field | Value |
+|-------|-------|
+| Panel compatible | `uctronics,uctronics-lcd` |
+| Kernel config | `CONFIG_DRM_PANEL_UCTRONICS_LCD=y` (builtin) |
+| DSI controller | `dsi@fde20000` (MIPI DSI2, rockchip,rk3588-mipi-dsi2) |
+| DSI lane rate | 480 Mbps (`rockchip,lane-rate = <0x1e0>`) |
+| Reset GPIO | GPIO3_C1 (`<0xe0 0x11 0x00>`) |
+| Backlight enable GPIO | GPIO3_D2 (`<0xe0 0x1a 0x00>`) |
+| Backlight | PWM-based, 256 levels |
+| VOP port | vp3 (MIPI0) |
+
+The full device tree from the working Radxa image is saved at:
+- `hardware/uctronics-dsi/radxa-ubuntu-22.04-full.dts` — complete DTS (10,390 lines)
+- `hardware/uctronics-dsi/dsi-panel-node.dts` — extracted DSI/backlight/power nodes
+
+**Armbian 26.2.1 does not work with this display** — the Armbian vendor
+kernel 6.1.115 does not include `CONFIG_DRM_PANEL_UCTRONICS_LCD`. The
+`rock-5a-radxa-display-8hd` overlay uses a different panel driver
+(`radxa,display-8hd`, 800x1280) which is not compatible. The backlight
+powers on but the panel shows nothing.
+
+To fix: build the Uctronics panel driver as a kernel module from Radxa's
+kernel source, or create a custom overlay with `panel-dsi` generic driver
+using the timing data from the saved device tree. See TODO.
+
 ## Audio
 
 4 ALSA devices (no Bluetooth):
