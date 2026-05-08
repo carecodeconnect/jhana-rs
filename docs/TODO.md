@@ -365,15 +365,12 @@ workloads.
       init sequence (200 DCS commands) extracted from baseline image kernel
       via disassembly. Installed as `panel-radxa-display-8hd.ko` replacement.
       Uses stock `rock-5a-radxa-display-8hd` overlay unchanged.
-- [ ] **Get TUI running on Armbian image** — display works, now need:
-      1. Build jhana-rs on Rock (sync + `scripts/rock-build.sh`)
-      2. Set up console font (TerminusBold 32x16, `setfont`)
-      3. Suppress kernel console messages (`dmesg -n 1`)
-      4. Install Piper TTS CLI (`/usr/local/bin/piper`)
-      5. Download models to Rock (Piper, Ministral/Llama, SenseVoice)
-      6. Test TUI launch via `scripts/rock-run.sh`
-      7. Verify text renders on DSI display
-      See `docs/01_DEV_SETUP.md` for setup details from old image.
+- [x] **Get TUI running on Armbian image** (2026-05-08)
+      Rust toolchain installed, jhana-rs built, TUI running on DSI display.
+      Piper TTS installed (`/usr/local/bin/piper` + espeak-ng-data symlink).
+      SenseVoice STT model downloaded and loading. Console font set to
+      TerminusBold 32x16. FB rotation (90 CW), dmesg suppression, and font
+      persist via `/etc/rc.local`. Llama 3.2 3B `.rkllm` already on device.
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)
