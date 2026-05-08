@@ -85,46 +85,72 @@ Not recommended — dead project. Use Armbian instead.
 
 ---
 
-## Rock 5A storage
+## Rock 5A storage (verified 2026-05-08)
 
-The Rock 5A has both **eMMC (32 GB, primary)** and **microSD slot**.
-Boot priority: eMMC → SD → NVMe. The current system runs from eMMC.
+**The Rock 5A has NO eMMC installed.** The OS boots from a 32 GB microSD
+card (`SD32G` on `mmc1`). The eMMC socket (`mmc0`) is unpopulated.
+See `docs/00_HARDWARE.md` for evidence.
 
-Strategy: **flash Armbian to SD card first, test, then flash to eMMC**
-once confirmed working. This preserves the current eMMC as a fallback.
+The microSD card is inside the Uctronics AI in a Box enclosure. The
+case must be opened to access it.
 
 ---
 
 ## Flash instructions
 
-### Method 1: Test on SD card first (RECOMMENDED)
+### Step-by-step: flash Armbian to a new microSD card
 
-Low risk — keeps the current eMMC system intact as fallback.
+**What you need:**
+- A spare microSD card (8 GB+, ideally 32 GB)
+- A microSD-to-USB card reader for the X61s
+- A small screwdriver to open the Uctronics enclosure
 
-**On the X61s:**
+**On the X61s (ThinkPad, Ubuntu):**
 
 ```bash
-# Download image
+# 1. Download Armbian image
 wget https://dl.armbian.com/rock-5a/Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
 
-# Decompress
+# 2. Decompress (takes ~30s, produces ~1.5 GB .img file)
 xz -d Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
 
-# Flash to SD card (replace /dev/sdX with actual device)
+# 3. Insert the NEW (spare) microSD card into USB reader on X61s
+
+# 4. Find the device name
+lsblk
+# Look for the new disk (e.g. /dev/sdb — NOT /dev/sda which is your laptop!)
+
+# 5. Flash the image (REPLACE /dev/sdX with actual device!)
 sudo dd if=Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img \
   of=/dev/sdX bs=4M status=progress
 sync
+
+# 6. Eject the card
+sudo eject /dev/sdX
 ```
 
-**On the Rock:**
+**Swap the cards on the Rock:**
 
-1. Power off the Rock
-2. Insert the SD card
-3. To boot from SD instead of eMMC, either:
-   - Hold the maskrom button while powering on, or
-   - Clear the eMMC bootloader first (see Method 2)
-4. The Rock should boot from SD into Armbian
-5. Default login: `root` / (set on first boot)
+1. Power off the Rock (unplug power cable)
+2. Open the Uctronics enclosure
+3. Remove the current 32 GB microSD card — **label it "BACKUP"**
+4. Insert the new Armbian microSD card
+5. Close the enclosure (loosely — you may need to swap back)
+6. Plug in power — Rock boots from the new card
+
+**First boot (via SSH from X61s):**
+
+The Rock should get the same IP (192.168.1.102) via DHCP, but Armbian's
+default SSH may differ. Try:
+
+```bash
+# Armbian default: root with password set on first boot
+# May need to connect a keyboard to the Rock's USB for first-time setup
+# Or try: ssh root@192.168.1.102 (default password: 1234)
+```
+
+If SSH doesn't work, connect a USB keyboard to the Rock and log in on
+the DSI display. Armbian prompts for root password on first boot.
 
 **Verify NPU driver:**
 ```bash
@@ -133,51 +159,13 @@ cat /sys/kernel/debug/rknpu/version
 dmesg | grep -i rknpu
 ```
 
-### Method 2: Flash to eMMC via USB Maskrom
+**If it doesn't work:** Power off, swap the BACKUP microSD back in,
+power on — you're back to the original system. Zero risk.
 
-Direct eMMC flash without needing a working OS.
+### After verification: set up the new system
 
-**Hardware setup:**
-1. Remove SD card and power cable
-2. Connect USB-A to USB-A cable from Rock's top USB 3.0 port to X61s
-3. Short the **Maskrom pin pads** on the Rock 5A PCB with a DuPont wire
-4. Plug in power — X61s should detect a Rockchip USB device
-
-**On the X61s:**
-```bash
-# Install flashing tool
-sudo apt install rkdeveloptool
-
-# Verify device detected
-sudo rkdeveloptool ld
-# Should show: DevNo=1 Vid=0x2207 Pid=0x350b
-
-# Download SPL loader from Radxa
-wget https://dl.radxa.com/rock5/sw/images/loader/rk3588_spl_loader_v1.15.113.bin
-
-# Load bootloader
-sudo rkdeveloptool db rk3588_spl_loader_v1.15.113.bin
-
-# Flash image to eMMC
-sudo rkdeveloptool wl 0 Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img
-
-# Reboot
-sudo rkdeveloptool rd
-```
-
-### Method 3: Flash eMMC from a running SD card system
-
-If already booted from SD card (Method 1):
-
-```bash
-# Identify eMMC device
-lsblk
-# eMMC is typically /dev/mmcblk0 when booted from SD
-
-# Flash (DESTRUCTIVE — overwrites all eMMC data)
-xz -dc /path/to/Armbian.img.xz | sudo dd of=/dev/mmcblk0 bs=4M status=progress
-sync
-```
+If RKNPU v0.9.8 is confirmed, keep the new card and set up the system.
+If not, swap the backup card back and investigate.
 
 ---
 
