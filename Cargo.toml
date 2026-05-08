@@ -12,7 +12,8 @@ log = "0.4"
 simplelog = "0.12"
 signal-hook = "0.3"
 serde_json = "1"
-sherpa-onnx = "1.13.0"
+sensevoice-rs = { version = "0.1.7", features = ["rknpu"] }
+rkllm-rs = "0.1.14"
 
 [lints.rust]
 # Relaxed from "forbid" to "warn" because sherpa-onnx uses unsafe FFI.

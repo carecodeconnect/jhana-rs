@@ -1,16 +1,20 @@
-//! Text-to-speech via sherpa-onnx VITS (Piper model).
+//! Text-to-speech via Piper CLI.
 //!
 //! Runs TTS on a background thread, receiving sentences via an mpsc channel.
-//! Each sentence is synthesized to a WAV buffer and played via `aplay`.
-//! Uses the same thread + mpsc pattern as GPIO and LLM streaming.
+//! Each sentence is piped to `piper` CLI which outputs a WAV file, then
+//! played via `aplay`. Uses the same thread + mpsc pattern as GPIO and LLM.
 //!
-//! # Why aplay for playback?
+//! # Why Piper CLI?
 //!
-//! The Rock 5A's audio hardware requires `plughw:` for channel conversion
-//! (Piper outputs mono, some devices need stereo). Using `aplay` via
-//! `std::process::Command` is the simplest approach and avoids pulling in
-//! rodio/cpal as dependencies. The TTS thread blocks on each `aplay` call,
-//! which naturally sequences sentences without overlap.
+//! sherpa-onnx was removed due to a protobuf-lite symbol clash with
+//! sensevoice-rs's sentencepiece-sys dependency. See `docs/05_NPU.md`.
+//! Piper CLI produces identical output — same model, same ONNX runtime,
+//! invoked as a subprocess instead of FFI.
+//!
+//! # Stopgap
+//!
+//! This is a temporary solution. The goal is pure Rust TTS on NPU via
+//! a piper-rknn-rs crate (fork of piper-rs with candle + rknn-rs backend).
 
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};
@@ -27,8 +31,12 @@ pub enum TtsCommand {
     Stop,
 }
 
-/// Path to the sherpa-onnx Piper model directory on the Rock.
-const MODEL_DIR: &str = "/home/ubuntu/models/vits-piper-en_US-lessac-medium";
+/// Path to the Piper CLI binary on the Rock.
+const PIPER_BIN: &str = "/usr/local/bin/piper";
+
+/// Path to the Piper ONNX model on the Rock.
+const MODEL_PATH: &str =
+    "/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx";
 
 /// ALSA playback device (Uctronics onboard speaker with plughw for mono->stereo).
 const PLAYBACK_DEVICE: &str = "plughw:2,0";
@@ -37,19 +45,22 @@ const PLAYBACK_DEVICE: &str = "plughw:2,0";
 /// 1.0 = normal, 1.3 = meditation pace, 2.0 = very slow.
 const LENGTH_SCALE: f32 = 1.3;
 
+/// Temporary WAV file for TTS output.
+const WAV_PATH: &str = "/tmp/jhana_tts.wav";
+
 /// Start the TTS background thread.
 ///
 /// Returns a `Sender<TtsCommand>` for sending sentences to be spoken.
-/// The thread loads the sherpa-onnx model once and reuses it for all
-/// subsequent sentences. If the model fails to load, sentences are
-/// logged but not spoken (graceful degradation).
+/// The thread processes sentences sequentially — each one is synthesized
+/// via Piper CLI and played via `aplay`. If Piper is not installed,
+/// sentences are logged but not spoken (graceful degradation).
 pub fn start() -> Sender<TtsCommand> {
     let (tx, rx) = std::sync::mpsc::channel::<TtsCommand>();
 
     std::thread::Builder::new()
         .name("tts".into())
         .spawn(move || {
-            info!("TTS thread started");
+            info!("TTS thread started (Piper CLI)");
             tts_loop(&rx);
             info!("TTS thread exiting");
         })
@@ -58,93 +69,88 @@ pub fn start() -> Sender<TtsCommand> {
     tx
 }
 
-/// TTS event loop — loads model, then processes sentences until channel closes.
+/// TTS event loop — processes sentences until channel closes.
 fn tts_loop(rx: &Receiver<TtsCommand>) {
-    let model_path = format!("{MODEL_DIR}/en_US-lessac-medium.onnx");
-    let tokens_path = format!("{MODEL_DIR}/tokens.txt");
-    let data_dir = format!("{MODEL_DIR}/espeak-ng-data");
-
-    let config = sherpa_onnx::OfflineTtsConfig {
-        model: sherpa_onnx::OfflineTtsModelConfig {
-            vits: sherpa_onnx::OfflineTtsVitsModelConfig {
-                model: Some(model_path.clone()),
-                tokens: Some(tokens_path),
-                data_dir: Some(data_dir),
-                length_scale: LENGTH_SCALE,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let Some(tts) = sherpa_onnx::OfflineTts::create(&config) else {
-        error!("Failed to load TTS model from {model_path}");
-        // Drain channel silently — TUI still works, just no audio
-        while let Ok(cmd) = rx.recv() {
-            if let TtsCommand::Speak(s) = cmd {
-                info!("TTS unavailable, skipping: {s}");
-            }
+    // Verify Piper is installed
+    match Command::new(PIPER_BIN).arg("--help").output() {
+        Ok(output) if output.status.success() || output.status.code() == Some(1) => {
+            info!("Piper CLI found at {PIPER_BIN}");
         }
-        return;
-    };
-
-    info!(
-        "TTS model loaded (sample_rate={}, speakers={})",
-        tts.sample_rate(),
-        tts.num_speakers()
-    );
-
-    let gen_config = sherpa_onnx::GenerationConfig::default();
+        _ => {
+            error!("Piper CLI not found at {PIPER_BIN} — TTS disabled");
+            while let Ok(cmd) = rx.recv() {
+                if let TtsCommand::Speak(s) = cmd {
+                    info!("TTS unavailable, skipping: {s}");
+                }
+            }
+            return;
+        }
+    }
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
             TtsCommand::Speak(sentence) => {
-                speak_sentence(&tts, &gen_config, &sentence);
+                speak_sentence(&sentence);
             }
             TtsCommand::Stop => {
                 info!("TTS stop requested");
-                // Drain any queued messages
                 while rx.try_recv().is_ok() {}
             }
         }
     }
 }
 
-/// Synthesize a sentence and play it via aplay.
-fn speak_sentence(
-    tts: &sherpa_onnx::OfflineTts,
-    gen_config: &sherpa_onnx::GenerationConfig,
-    sentence: &str,
-) {
+/// Synthesize a sentence via Piper CLI and play via aplay.
+fn speak_sentence(sentence: &str) {
     let start = std::time::Instant::now();
 
-    let Some(audio) =
-        tts.generate_with_config(sentence, gen_config, None::<fn(&[f32], f32) -> bool>)
-    else {
-        error!("TTS synthesis failed for: {sentence}");
-        return;
-    };
+    // Piper CLI: echo "text" | piper --model X --output_file Y --length_scale Z
+    let piper_status = Command::new(PIPER_BIN)
+        .args([
+            "--model",
+            MODEL_PATH,
+            "--output_file",
+            WAV_PATH,
+            "--length_scale",
+            &LENGTH_SCALE.to_string(),
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(sentence.as_bytes());
+            }
+            child.wait()
+        });
 
-    let synth_time = start.elapsed();
-    #[expect(clippy::cast_precision_loss)] // sample counts are small enough
-    let duration = audio.samples().len() as f32 / audio.sample_rate() as f32;
-    info!(
-        "TTS: {:.2}s synth, {:.2}s audio — {}",
-        synth_time.as_secs_f32(),
-        duration,
-        &sentence[..sentence.len().min(50)]
-    );
-
-    // Save to temp WAV and play via aplay
-    let wav_path = "/tmp/jhana_tts.wav";
-    if !audio.save(wav_path) {
-        error!("Failed to save TTS WAV to {wav_path}");
-        return;
+    match piper_status {
+        Ok(status) if status.success() => {
+            let synth_time = start.elapsed();
+            info!(
+                "TTS: {:.2}s synth — {}",
+                synth_time.as_secs_f32(),
+                &sentence[..sentence.len().min(50)]
+            );
+        }
+        Ok(status) => {
+            error!(
+                "Piper failed with {status} for: {}",
+                &sentence[..sentence.len().min(50)]
+            );
+            return;
+        }
+        Err(e) => {
+            error!("Piper error: {e}");
+            return;
+        }
     }
 
+    // Play via aplay
     match Command::new("aplay")
-        .args(["-D", PLAYBACK_DEVICE, wav_path])
+        .args(["-D", PLAYBACK_DEVICE, WAV_PATH])
         .output()
     {
         Ok(output) if output.status.success() => {}

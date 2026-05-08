@@ -11,6 +11,7 @@
 
 mod gpio;
 mod llm;
+mod stt;
 mod tts;
 mod ui;
 
@@ -31,6 +32,7 @@ use simplelog::{Config, LevelFilter, WriteLogger};
 
 use crate::gpio::ButtonEvent;
 use crate::llm::LlmOutput;
+use crate::stt::SttResult;
 use crate::ui::{App, AppState, render};
 
 /// Default meditation type loaded on startup.
@@ -39,7 +41,7 @@ const DEFAULT_MEDITATION: &str = "test";
 fn main() -> io::Result<()> {
     // File logger — all output goes to jhana-rs.log, not stdout/tty
     let log_file = std::fs::File::create("jhana-rs.log")?;
-    WriteLogger::init(LevelFilter::Debug, Config::default(), log_file)
+    WriteLogger::init(LevelFilter::Info, Config::default(), log_file)
         .expect("failed to init logger");
 
     info!("jhana-rs starting");
@@ -54,6 +56,10 @@ fn main() -> io::Result<()> {
 
     // LLM output channel — background streaming thread sends here
     let (llm_tx, llm_rx) = mpsc::channel::<LlmOutput>();
+
+    // STT background thread — receives listen commands, sends back transcriptions
+    let (stt_result_tx, stt_result_rx) = mpsc::channel::<SttResult>();
+    let stt_tx = stt::start(stt_result_tx);
 
     // TTS background thread — receives sentences to speak aloud
     let tts_tx = tts::start();
@@ -83,6 +89,8 @@ fn main() -> io::Result<()> {
         &llm_tx,
         &llm_rx,
         &tts_tx,
+        &stt_tx,
+        &stt_result_rx,
     );
 
     // Cleanup — always restore terminal state
@@ -111,6 +119,8 @@ fn run_loop(
     llm_tx: &mpsc::Sender<LlmOutput>,
     llm_rx: &mpsc::Receiver<LlmOutput>,
     tts_tx: &mpsc::Sender<tts::TtsCommand>,
+    stt_tx: &mpsc::Sender<stt::SttCommand>,
+    stt_rx: &mpsc::Receiver<SttResult>,
 ) -> io::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, app))?;
@@ -129,7 +139,43 @@ fn run_loop(
                     ButtonEvent::Back => return Ok(()),
                     ButtonEvent::Up => app.scroll_up(),
                     ButtonEvent::Down => app.scroll_down(),
-                    ButtonEvent::Enter => handle_start(app, llm_tx),
+                    ButtonEvent::Enter => handle_start(app, stt_tx),
+                }
+            }
+        }
+
+        // Drain STT results (non-blocking)
+        while let Ok(result) = stt_rx.try_recv() {
+            match result {
+                SttResult::Recording => {
+                    info!("STT: recording from mic");
+                    app.push_sentence("Listening...".to_string());
+                }
+                SttResult::Processing => {
+                    info!("STT: processing audio");
+                    app.push_sentence("Transcribing...".to_string());
+                }
+                SttResult::Transcribed(text) => {
+                    info!("STT transcribed: {text}");
+                    app.reset();
+                    app.push_sentence(format!("You said: {text}"));
+                    // Feed transcription to LLM as the user prompt
+                    match llm::load_prompts(DEFAULT_MEDITATION) {
+                        Ok((system, _user)) => {
+                            app.start_generating();
+                            // Use the transcribed text as the user prompt
+                            llm::start_streaming(llm_tx.clone(), system, text);
+                        }
+                        Err(e) => {
+                            error!("Failed to load prompts: {e}");
+                            app.push_sentence(format!("Error: {e}"));
+                        }
+                    }
+                }
+                SttResult::Error(e) => {
+                    error!("STT error: {e}");
+                    app.push_sentence(format!("STT Error: {e}"));
+                    app.finish();
                 }
             }
         }
@@ -172,7 +218,7 @@ fn run_loop(
                 }
                 KeyCode::Up => app.scroll_up(),
                 KeyCode::Down => app.scroll_down(),
-                KeyCode::Enter => handle_start(app, llm_tx),
+                KeyCode::Enter => handle_start(app, stt_tx),
                 other => {
                     info!("key: {other:?}");
                 }
@@ -185,23 +231,15 @@ fn run_loop(
 
 /// Handle START/ENTER action based on current state.
 ///
-/// - Idle: load prompts and start LLM streaming
+/// - Idle: start listening via STT (mic -> transcribe -> LLM)
 /// - Done: reset and return to idle for another session
 /// - Generating/Paused: ignored (generation is already in progress)
-fn handle_start(app: &mut App, llm_tx: &mpsc::Sender<LlmOutput>) {
+fn handle_start(app: &mut App, stt_tx: &mpsc::Sender<stt::SttCommand>) {
     match app.state {
         AppState::Idle => {
-            info!("starting meditation: {DEFAULT_MEDITATION}");
-            match llm::load_prompts(DEFAULT_MEDITATION) {
-                Ok((system, user)) => {
-                    app.start_generating();
-                    llm::start_streaming(llm_tx.clone(), system, user);
-                }
-                Err(e) => {
-                    error!("Failed to load prompts: {e}");
-                    app.push_sentence(format!("Error: {e}"));
-                }
-            }
+            info!("starting STT listen");
+            app.push_sentence("Speak your meditation request...".to_string());
+            let _ = stt_tx.send(stt::SttCommand::Listen);
         }
         AppState::Done => {
             info!("resetting to idle");

@@ -2,17 +2,25 @@
 
 ## SSH into the Rock 5A
 
-The LAN port on the AI in a Box connects directly to the laptop (ThinkPad
-X61s) via ethernet. This is not a router connection -- it requires manual
-network setup on the laptop.
+### Option A: Router ethernet (current setup)
 
-### Prerequisites (on the X61s)
+Both the X61s and Rock 5A are plugged into the router. The Rock gets
+`192.168.1.102` via DHCP (hostname `rock-5a`) and has direct internet
+access. No manual network setup needed.
 
+```bash
+sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102
+```
+
+### Option B: Direct ethernet (X61s to Rock, no router)
+
+When no router is available, connect the Rock directly to the X61s via
+ethernet. Requires manual DHCP setup on the laptop.
+
+Prerequisites:
 ```bash
 sudo apt install dnsmasq sshpass
 ```
-
-### Connect
 
 1. Assign a static IP to the laptop ethernet interface:
    ```bash
@@ -22,8 +30,11 @@ sudo apt install dnsmasq sshpass
 2. Start a DHCP server (runs in foreground -- use a separate terminal):
    ```bash
    sudo dnsmasq --no-daemon --interface=enp0s25 \
-     --dhcp-range=192.168.1.100,192.168.1.200,12h --bind-interfaces
+     --dhcp-range=192.168.1.100,192.168.1.200,12h --bind-interfaces \
+     --port=0
    ```
+   `--port=0` disables the DNS server (only DHCP is needed). Without it,
+   dnsmasq fails because systemd-resolved already holds port 53.
 
 3. Power on (or reboot) the Rock 5A. Wait ~2 minutes for boot.
 
@@ -220,21 +231,10 @@ the sync step but is less comfortable for large edits.
 
 ### Give the Rock internet access
 
-#### Option A: Direct router ethernet (preferred for downloads)
+With router ethernet (current setup), the Rock already has internet access
+via DHCP. No extra steps needed. Download speed ~12 MB/s.
 
-Plug the Rock directly into the router via ethernet. Gets DHCP IP
-`192.168.1.102` (hostname `rock-5a`). Download speed ~12 MB/s.
-
-Must remove the X61s static IP and stop dnsmasq first:
-```bash
-# On X61s
-sudo ip addr del 192.168.1.1/24 dev enp0s25
-# Kill dnsmasq in its terminal (ctrl+c)
-```
-
-SSH still works at the same IP since the router assigns `192.168.1.102`.
-
-#### Option B: NAT forwarding via X61s (for direct ethernet dev)
+#### Fallback: NAT forwarding via X61s (direct ethernet, no router)
 
 When the Rock is connected directly to the X61s via ethernet (no router),
 forward the X61s wifi connection. Download speed ~1 MB/s.
@@ -244,7 +244,8 @@ On the X61s (one-time, until reboot):
 sudo ip addr add 192.168.1.1/24 dev enp0s25
 # In a separate terminal:
 sudo dnsmasq --no-daemon --interface=enp0s25 \
-  --dhcp-range=192.168.1.100,192.168.1.200,12h --bind-interfaces
+  --dhcp-range=192.168.1.100,192.168.1.200,12h --bind-interfaces \
+  --port=0
 
 sudo sysctl -w net.ipv4.ip_forward=1
 sudo iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE

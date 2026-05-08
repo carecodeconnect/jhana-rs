@@ -1,65 +1,63 @@
-//! Test sherpa-onnx VITS TTS with Piper model on Rock 5A.
+//! Test Piper CLI TTS on Rock 5A.
 //!
 //! Usage: `test_tts`
 //!
-//! Expects model files at /home/ubuntu/models/ and espeak-ng-data
-//! at /usr/local/lib/python3.10/dist-packages/piper_phonemize/espeak-ng-data
+//! Synthesizes a test sentence via Piper CLI and measures latency.
 
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 
 fn main() {
-    let base = "/home/ubuntu/models/vits-piper-en_US-lessac-medium";
-    let model = &format!("{base}/en_US-lessac-medium.onnx");
-    let tokens = &format!("{base}/tokens.txt");
-    let data_dir = &format!("{base}/espeak-ng-data");
+    let model = "/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx";
     let text = "Close your eyes and take a deep breath in.";
+    let wav_path = "/tmp/piper_test.wav";
+    let length_scale = 1.3;
 
-    println!("=== sherpa-onnx VITS TTS test ===");
+    println!("=== Piper CLI TTS test ===");
     println!("Model: {model}");
     println!("Text: {text}");
+    println!("Length scale: {length_scale}");
     println!();
 
-    let config = sherpa_onnx::OfflineTtsConfig {
-        model: sherpa_onnx::OfflineTtsModelConfig {
-            vits: sherpa_onnx::OfflineTtsVitsModelConfig {
-                model: Some(model.into()),
-                tokens: Some(tokens.into()),
-                data_dir: Some(data_dir.into()),
-                length_scale: 1.3,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    for i in 1..=3 {
+        let start = Instant::now();
 
-    let load_start = Instant::now();
-    let tts = sherpa_onnx::OfflineTts::create(&config).expect("failed to create TTS");
-    println!(
-        "TTS loaded in {:.2}s (sample_rate={}, speakers={})",
-        load_start.elapsed().as_secs_f32(),
-        tts.sample_rate(),
-        tts.num_speakers(),
-    );
+        let mut child = Command::new("/usr/local/bin/piper")
+            .args([
+                "--model",
+                model,
+                "--output_file",
+                wav_path,
+                "--length_scale",
+                &length_scale.to_string(),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to start piper");
 
-    let gen_config = sherpa_onnx::GenerationConfig::default();
-    let synth_start = Instant::now();
-    let audio = tts
-        .generate_with_config(text, &gen_config, None::<fn(&[f32], f32) -> bool>)
-        .expect("failed to synthesize");
+        if let Some(ref mut stdin) = child.stdin {
+            stdin
+                .write_all(text.as_bytes())
+                .expect("failed to write to piper stdin");
+        }
 
-    let synth_time = synth_start.elapsed();
-    #[expect(clippy::cast_precision_loss)]
-    let duration = audio.samples().len() as f32 / audio.sample_rate() as f32;
+        let output = child.wait_with_output().expect("failed to wait for piper");
+        let synth_time = start.elapsed();
 
-    println!("Synthesized in {:.2}s", synth_time.as_secs_f32());
-    println!("Audio: {:.2}s at {} Hz", duration, audio.sample_rate());
-
-    // Save WAV
-    let ok = audio.save("/tmp/sherpa_test.wav");
-    if ok {
-        println!("Saved to /tmp/sherpa_test.wav");
-    } else {
-        eprintln!("Failed to save WAV");
+        if output.status.success() {
+            println!(
+                "[run {i}] synth={:.2}s — saved to {wav_path}",
+                synth_time.as_secs_f32(),
+            );
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[run {i}] piper failed: {stderr}");
+        }
     }
+
+    println!();
+    println!("Play with: aplay -D plughw:2,0 {wav_path}");
 }
