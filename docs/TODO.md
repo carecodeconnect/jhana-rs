@@ -330,28 +330,36 @@ workloads.
       - 3B model: fails to allocate 3.2 GB NPU memory
       - 270M model: loads (1.24s, 66 tok/s) but matmul w8a8 produces garbage
       - NPU hardware works — driver too old for correct w8a8 computation
-      - Need RKNPU driver v0.9.7+ (see `docs/06_KERNEL.md`)
-- [ ] **Flash Armbian image to get RKNPU v0.9.8** — see `docs/07_IMAGE.md`
-      Steps on X61s (ThinkPad, Ubuntu):
-      1. Download: `wget https://dl.armbian.com/rock-5a/Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz`
-      2. Decompress: `xz -d Armbian_*.img.xz`
-      3. Insert microSD into X61s USB reader
-      4. Find device: `lsblk` (e.g. `/dev/sdb`)
-      5. Flash: `sudo dd if=Armbian_*.img of=/dev/sdb bs=4M status=progress && sync`
-      6. Eject SD, insert into Rock 5A, power on
-      7. Rock boots from SD (eMMC untouched as fallback)
-      8. Verify: `cat /sys/kernel/debug/rknpu/version` → v0.9.8
-      9. If working: re-install deps, Rust, models (see `docs/07_IMAGE.md`)
-      10. Optional: flash to eMMC from running SD system
-- [ ] Re-run `test_rkllm` on new image — verify tokens stream correctly
-- [ ] Benchmark tok/s on NPU (expect ~5-8 tok/s for 3B)
+- [x] **Flash Armbian 26.2.1** — Ubuntu 24.04 Noble, kernel 6.1.115,
+      RKNPU v0.9.8 (2026-05-08). See `docs/07_IMAGE.md`.
+- [x] Re-run `test_rkllm` on new image — **SUCCESS** (2026-05-08)
+      - Llama-3.2-3B-Instruct: **4.49 tok/s**, 2.06s first token, 130s load
+      - Coherent meditation text with proper [N] pause markers
+      - Faster than CPU baseline (mistral.rs 3.89 tok/s) + frees CPU for TTS/STT
+- [ ] **Rewrite `src/llm.rs`** — replace HTTP/SSE client with rkllm-rs direct calls
+      - Remove all TCP/HTTP/SSE code
+      - Load model once at thread start (like TTS/STT pattern)
+      - `start_streaming()` spawns thread with `RkllmCallbackHandler`
+      - Callback feeds tokens through `ChunkParser` → `LlmOutput` via mpsc
+      - Keep `ChunkParser` (bracket state machine for `[N]` pause markers)
+      - Keep `load_prompts()` for system/user prompt loading
+      - Use Llama 3 chat template (already working in test_rkllm.rs)
+- [ ] Wire into main.rs — same `llm_tx`/`llm_rx` channels, no API change
+- [ ] Test end-to-end: → button → STT → LLM (NPU) → TTS → display
+- [ ] Measure RAM: verify LLM (~4 GB) + STT (~1 GB) + TTS fit in 8 GB
+- [ ] Remove mistral.rs from Rock (no HTTP server needed)
+- [ ] Reduce model load time (130s is slow — investigate prompt caching,
+      or keep model loaded across meditation sessions)
 - [ ] Download Gemma-3-4B-IT .rkllm as alternative (5.62 GB, if RAM allows)
 - [ ] Convert Ministral 3B to .rkllm via rkllm-toolkit on X61s (no pre-built exists)
 - [ ] Benchmark Ministral 3B .rkllm vs Llama 3.2 3B .rkllm (meditation quality + tok/s)
-- [ ] Rewrite `src/llm.rs` — replace HTTP client with rkllm-rs direct calls
-- [ ] Test meditation generation quality: compare with Ministral 3B (CPU)
-- [ ] Measure RAM: verify LLM + STT fit in 8 GB
-- [ ] Remove mistral.rs dependency (no more HTTP server needed)
+- [ ] Compare meditation text quality: Llama 3.2 3B (NPU) vs Ministral 3B (CPU)
+- [ ] Set up console font and dmesg suppression on new Armbian image
+      (see `docs/01_DEV_SETUP.md` — setfont, dmesg -n 1)
+- [ ] Install Piper TTS CLI on new image (`/usr/local/bin/piper`)
+- [ ] Download Piper model to new image (`~/models/vits-piper-en_US-lessac-medium/`)
+- [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
+- [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)
