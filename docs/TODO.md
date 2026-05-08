@@ -736,6 +736,14 @@ Prepare jhana-rs for publication as a Rust crate on crates.io.
 - [ ] Serial output to /dev/ttyS6 at 115200 baud
 - [ ] systemd service (jhana-rs.service)
 - [ ] Boot-to-app: auto-start on power on
+- [ ] **Add eMMC module to Rock 5A** — currently booting from microSD (slower).
+      Research compatible eMMC modules for the Rock 5A socket (mmc0, sdhci-dwcmshc
+      fe2e0000). The Rock 5A supports eMMC 5.1. Options:
+      - Radxa official eMMC modules (16/32/64/128 GB) from radxa.com
+      - Generic eMMC 5.1 modules with B2B connector (check pinout compatibility)
+      - Expected speed improvement: eMMC ~300 MB/s sequential vs microSD ~100 MB/s
+      - Faster model loading (4.35 GB Llama model), faster boot, more reliable
+      - Can boot from eMMC and use microSD for extra storage or backup
 
 ---
 
