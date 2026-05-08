@@ -1,5 +1,4 @@
-obj-m += panel-radxa-display-8hd.o
-panel-radxa-display-8hd-y := panel-ilitek-ili9881c.o
+obj-m += panel-jadard-jd9365da-h3.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
