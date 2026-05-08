@@ -70,38 +70,67 @@ uctronics-sound {
 
 Missing: uctronics-codec (card 2 on old image)
 
-## Fix plan
-
-Same approach as the display fix:
-
-1. Extract `snd-soc-uctronics-codec` kernel module from the baseline
-   image kernel (`vmlinuz-5.10.110-102-rockchip`)
-2. Disassemble the codec driver to understand the hardware interface
-3. Either: build a compatible module for Armbian kernel 6.1.115, or
-   find if the codec is a standard chip (e.g. MAX98357A + digital mic)
-   that already has upstream kernel support
-4. Create a device tree overlay adding `audio-codec-0` and
-   `uctronics-sound` nodes
-5. Install module + overlay, test mic and speaker
-
-### Alternative: identify the actual codec chip
+## Hardware identification
 
 The `uctronics,uctronics-codec` driver has GPIO pins for:
-- `sdmode` — likely a Class D amplifier shutdown pin (MAX98357A pattern)
-- `gainsel_1/2/3` — 3-bit gain selection
+- `sdmode` (GPIO3_A5) — speaker amplifier enable (Class D shutdown pin)
+- `gainsel_1/2/3` (GPIO3_A3/A5/A2) — 3-bit gain selection
 
-This is consistent with a **MAX98357A** (or similar I2S Class D amp)
-for the speaker, and a separate **digital MEMS mic** (I2S input). The
-driver may be a thin wrapper combining both into one ALSA card.
+This pattern matches a **MAX98357A** (or similar I2S Class D amp) for
+the speaker, plus a **digital MEMS microphone** on the same I2S bus.
+The custom driver is likely a thin wrapper combining both into one
+ALSA card.
 
-If the amp is MAX98357A, Armbian already has `snd-soc-max98357a.ko`.
-The DMIC may be supported by `snd-soc-dmic.ko`. A device tree overlay
-could wire these up without any custom kernel module.
+### I2S bus
+
+The uctronics codec uses **I2S2 at `0xfe480000`** (`rk3588-i2s-tdm`),
+separate from the es8316's I2S controller. Pinctrl phandles: `0xf7`,
+`0xf8`, `0xf9`, `0xfa`. 2-channel playback + 2-channel capture.
+
+## Armbian kernel audio support
+
+```
+CONFIG_SND_SOC_ROCKCHIP_MULTICODECS=y    # available (sound card framework)
+CONFIG_SND_SOC_MAX98357A is not set      # NOT available
+CONFIG_SND_SOC_DMIC is not set           # NOT available
+CONFIG_SND_SOC_SIMPLE_AMPLIFIER is not set  # NOT available
+CONFIG_SND_SIMPLE_CARD=y                 # available
+```
+
+**Neither MAX98357A nor DMIC drivers are in the Armbian kernel.**
+
+## Fix plan
+
+### Option A: Build out-of-tree modules (recommended)
+
+Build `snd-soc-max98357a.ko` and `snd-soc-dmic.ko` from upstream kernel
+source as out-of-tree modules (same approach as the display fix). These
+are simple drivers (~100 lines each). Then create a DT overlay.
+
+1. Download `sound/soc/codecs/max98357a.c` and `sound/soc/codecs/dmic.c`
+   from the Armbian kernel source (linux-rockchip 6.1 branch)
+2. Build as out-of-tree modules on the Rock
+3. Create DT overlay adding `audio-codec-0` (MAX98357A compatible)
+   and `uctronics-sound` (multicodecs-card) nodes
+4. Install modules + overlay, test
+
+### Option B: Extract uctronics codec from baseline kernel
+
+Same approach as the display fix — disassemble the built-in driver from
+the baseline image vmlinuz. More complex than Option A since we'd need
+to reverse-engineer a complete codec driver, but guaranteed to match the
+original behavior.
+
+### Option C: Recompile Armbian kernel
+
+Enable `CONFIG_SND_SOC_MAX98357A=m` and `CONFIG_SND_SOC_DMIC=m` in the
+Armbian kernel config and rebuild. Most reliable but requires full
+kernel build infrastructure.
 
 ## Workaround
 
-Use the es8316 headphone jack (card 0, `plughw:0,0`) with an external
-mic for testing until the uctronics codec is fixed.
+No external mic available. Audio testing blocked until uctronics codec
+is fixed.
 
 ## ALSA mixer notes (es8316, card 0)
 
