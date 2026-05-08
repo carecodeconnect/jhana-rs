@@ -39,7 +39,8 @@ const MODEL_PATH: &str =
     "/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx";
 
 /// ALSA playback device (Uctronics onboard speaker with plughw for mono->stereo).
-const PLAYBACK_DEVICE: &str = "plughw:2,0";
+/// Card 0 on Armbian 26.2.1, was card 2 on old Radxa Ubuntu image.
+const PLAYBACK_DEVICE: &str = "plughw:0,0";
 
 /// Speech rate — higher values produce slower, calmer speech.
 /// 1.0 = normal, 1.3 = meditation pace, 2.0 = very slow.

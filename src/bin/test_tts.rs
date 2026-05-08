@@ -59,5 +59,5 @@ fn main() {
     }
 
     println!();
-    println!("Play with: aplay -D plughw:2,0 {wav_path}");
+    println!("Play with: aplay -D plughw:0,0 {wav_path}");
 }

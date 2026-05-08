@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let status = Command::new("arecord")
                 .args([
                     "-D",
-                    "plughw:2,0",
+                    "plughw:0,0",
                     "-f",
                     "S16_LE",
                     "-r",

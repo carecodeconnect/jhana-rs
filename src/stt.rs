@@ -13,7 +13,7 @@
 //! # Why arecord for capture?
 //!
 //! Same rationale as aplay for TTS — the Rock 5A's Uctronics mic is on
-//! ALSA card 2, and shelling out to `arecord` avoids pulling in cpal as
+//! ALSA card 0 (Armbian) or card 2 (old image), and shelling out avoids
 //! a dependency. The STT thread blocks during recording, which is fine
 //! since the user is speaking.
 
@@ -27,7 +27,8 @@ use sensevoice_rs::SenseVoiceSmall;
 use sensevoice_rs::silero_vad::VadConfig;
 
 /// ALSA capture device (Uctronics onboard mic).
-const CAPTURE_DEVICE: &str = "plughw:2,0";
+/// Card 0 on Armbian 26.2.1, was card 2 on old Radxa Ubuntu image.
+const CAPTURE_DEVICE: &str = "plughw:0,0";
 
 /// Recording duration in seconds.
 const RECORD_SECONDS: u32 = 5;
