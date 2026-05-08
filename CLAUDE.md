@@ -7,14 +7,14 @@ and the wrong architecture (x86_64 vs aarch64).
 
 **NEVER run on the X61s:**
 - `cargo build`
+- `cargo check`
+- `cargo clippy`
 - `cargo test`
 - `cargo doc`
-- Any compilation that pulls C/C++ deps (llama.cpp, whisper.cpp)
+- Any cargo command that compiles or type-checks
 
 **Allowed on the X61s:**
-- `cargo check` (type checking only, no linking)
-- `cargo clippy` (lint checking)
-- `cargo fmt` (formatting)
+- `cargo fmt` (formatting only)
 - Editing code
 - Git operations
 - Running `scripts/rock-*.sh` scripts to sync/build/deploy to the Rock
@@ -29,8 +29,8 @@ scripts/rock-run.sh    # launch TUI on Rock display
 ## Build workflow
 
 1. Edit code on X61s
-2. `cargo check` and `cargo clippy` on X61s (fast feedback)
-3. `scripts/rock-sync.sh` to sync to Rock
+2. `scripts/rock-sync.sh` to sync to Rock
+3. `cargo check` and `cargo clippy` on Rock via SSH (or `scripts/rock-build.sh`)
 4. `scripts/rock-build.sh` to build and test on Rock
 5. `scripts/rock-run.sh` to launch on Rock display
 6. `scripts/rock-log.sh` to read output log
@@ -45,7 +45,7 @@ cp scripts/pre-commit .git/hooks/pre-commit
 ## Rock access
 
 ```bash
-sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102
+sshpass -p 'ubunturock' ssh ubuntu@192.168.1.83
 ```
 
 Or use `scripts/rock-ssh.sh`.
