@@ -114,10 +114,27 @@ The Armbian kernel already has `panel-ilitek-ili9881c.ko` which supports
 sequence will differ from the BananaPi panel but the basic ILI9881C
 protocol is the same.
 
-**Next step:** Try the BananaPi LHR050H41 compatible in the overlay —
-the ILI9881C init may be close enough to get pixels on screen, even if
-colours or orientation are slightly off. If not, extract the full init
-sequence from the old kernel and add a new panel entry to the driver.
+## ILI9881C init sequence extracted (2026-05-08)
+
+The full init sequence (188 register writes, 5 page switches) was
+extracted from the old kernel binary by:
+
+1. Searching vmlinuz for `FF 98 81 XX` (ILI9881C page-switch commands)
+2. Finding the contiguous register-value data block near the
+   `uctronics_display_desc` symbol (offset 16399752 in vmlinuz)
+3. Parsing `E0 XX` as page switches, `RR VV` as register-value pairs
+4. Converting to `ILI9881C_SWITCH_PAGE_INSTR` / `ILI9881C_COMMAND_INSTR`
+   format matching the existing `panel-ilitek-ili9881c.c` driver
+
+Saved at: `hardware/uctronics-dsi/ili9881c-init-sequence.c`
+
+The BananaPi LHR050H41 init (also ILI9881C, 720x1280) was tested —
+DSI connects, backlight brighter, but no image. The Uctronics panel
+needs its own specific init sequence.
+
+**Next step:** Fork `panel-ilitek-ili9881c.c`, add the extracted init
+sequence as a new panel entry with `uctronics,uctronics-lcd` compatible,
+compile as kernel module, install on Armbian, test.
 
 ## Kernel symbols from old image
 
