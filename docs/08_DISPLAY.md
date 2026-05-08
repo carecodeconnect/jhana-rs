@@ -215,3 +215,130 @@ The init command format is simple: `{u8 reg, u8 val}` pairs sent via
 `mipi_dsi_dcs_write_buffer()`. The init sequence needs to be extracted
 from the old kernel's `jadard_jd9365da_enable` function (inlined at
 0x6df990, 109 `mipi_dsi_generic_write` calls).
+
+## Forked JD9365DA driver (2026-05-08)
+
+Created `hardware/uctronics-dsi/panel-jadard-jd9365da-h3.c` — forked
+from Armbian's stock driver with a new `uctronics,uctronics-lcd` panel
+entry. Includes 720x1280p60 timings (66 MHz, H:40/20/55, V:15/8/15)
+and an init sequence extracted from disassembly.
+
+| File | Description |
+|------|-------------|
+| `panel-jadard-jd9365da-h3.c` | Forked driver with uctronics panel entry |
+| `jd9365da-init-sequence.c` | Init sequence from disassembly (109 cmds, may be wrong) |
+| `panel-init-sequence.txt` | ILI9881C-format init (WRONG IC, kept for reference) |
+| `Makefile` | Out-of-tree kernel module build |
+
+**Problem: init sequence may be incomplete.** The extracted uctronics
+init has a truncated page 2 (GIP timing) section — stops at register
+`0x2D` while the reference panels (`cz101b4001`, `radxa-10hd`) continue
+through `0x7E`. Missing GIP routing would explain why the panel doesn't
+render despite correct DSI link, power, and backlight.
+
+Additionally, the `jd9365da-init-sequence.c` file starts with
+`{ 0xFF, 0x11 }` which looks like an ILI9881C register, not JD9365DA
+(`0xE0` for page switching). This file likely contains incorrect data
+from a bad disassembly extraction — do NOT use it.
+
+## Current driver state on Armbian (2026-05-08)
+
+```
+Kernel:     6.1.115-vendor-rk35xx
+Overlay:    rock-5a-radxa-display-8hd
+Driver:     ili9881c-dsi (WRONG — should be jadard-jd9365da)
+DSI:        connected, 720x1280, 480 Mbps x 4 lanes
+FB:         /dev/fb0 at 720x1280
+GPIO-132:   HIGH (panel power on)
+GPIO-122:   HIGH (backlight enable)
+GPIO-113:   LOW  (panel reset deasserted)
+Problem:    ILI9881C driver sends wrong init format for JD9365DA IC
+```
+
+The overlay's `compatible` string matches `ili9881c` when it should
+match `uctronics,uctronics-lcd` to load the JD9365DA driver instead.
+
+## Useful Sensors baseline image (2026-05-08)
+
+Downloaded the original working image from:
+`https://storage.googleapis.com/download.usefulsensors.com/ai_in_a_box/ai_in_a_box_baseline_16gb_20240125.img.gz`
+
+**Purpose:** Extract the working `panel-uctronics-lcd` kernel module
+or driver source from the image. The module contains the correct init
+sequence baked into its `.data` section. Comparing with our extracted
+init will reveal what's wrong.
+
+**Extraction plan:**
+1. Mount the image's root partition on the X61s (loopback)
+2. Find `panel-uctronics-lcd.ko` in `/lib/modules/`
+3. Use `objdump -t` to find the `init_cmds` symbol
+4. Use `objdump -s -j .rodata` to dump the init data
+5. Parse the `{u8 reg, u8 val}` pairs
+6. Compare with our `uctronics_lcd_init_cmds` in the forked driver
+7. Fix any differences, rebuild, and test
+
+**Alternative:** If the image includes kernel source (check `/usr/src/`),
+the C source will have the init array directly readable.
+
+## CONFIRMED: Panel IC is ILI9881C (2026-05-08, baseline image analysis)
+
+**The "JD9365DA correction" was WRONG.** Disassembly of the working
+baseline kernel confirms the panel uses ILI9881C page-switch commands.
+
+### Evidence from baseline image disassembly
+
+Downloaded `ai_in_a_box_baseline_16gb_20240125.img.gz` (2.4 GB) from
+Useful Sensors. Mounted the image, extracted vmlinuz and System.map
+for kernel `5.10.110-102-rockchip-g9e38c248f2d3`.
+
+Disassembled `jadard_jd9365da_enable` at `0x6df990` on the Rock
+(native aarch64 `objdump`). Key findings:
+
+1. **The function calls `mipi_dsi_dcs_write` (at 0x6a1e54) 200 times**
+2. **First call sends `{0xFF, 0x98, 0x81, 0x03}`** — ILI9881C page 3 select!
+   - w1 = 0xFF (DCS command), data = {0x98, 0x81, 0x03}, len = 3
+3. **Data table at 0xfa4170** contains 4 page payloads:
+   `{98 81 03} {98 81 04} {98 81 01} {98 81 00}` — pages 3, 4, 1, 0
+4. All register writes use `mipi_dsi_dcs_write(dsi, reg, &val, 1)`
+
+The driver name `jadard_jd9365da_enable` is misleading — Uctronics
+forked the JD9365DA driver framework but sends ILI9881C protocol.
+
+### Correct init sequence structure
+
+200 total DCS write calls:
+- **Page 3** (GIP timing): 128 register writes (0x01-0x8A)
+- **Page 4** (power/MIPI): 13 register writes
+- **Page 1** (VCOM/power): 7 register writes
+- **Page 0** (gamma/display): 45 register writes + sleep out + display on
+
+Saved at: `hardware/uctronics-dsi/ili9881c-init-extracted.c`
+
+### Comparison with previous extractions
+
+| File | Source | Status |
+|------|--------|--------|
+| `ili9881c-init-sequence.c` | Binary pattern search in vmlinuz | **WRONG** — found ILI9881C data from a different driver in the same kernel |
+| `jd9365da-init-sequence.c` | Disassembly attempt | **WRONG** — starts with `{0xFF, 0x11}`, incorrect IC assumption |
+| `panel-init-sequence.txt` | DTS format extraction | **WRONG** — data from wrong offset in vmlinuz |
+| `ili9881c-init-extracted.c` | Baseline image disassembly | **CORRECT** — traced every mipi_dsi_dcs_write call argument |
+
+### Why previous attempts failed
+
+1. The kernel has MULTIPLE panel drivers compiled in (ILI9881C for
+   BananaPi, JD9365DA for Radxa 10HD, AND the uctronics panel)
+2. Searching for `98 81` byte patterns found the BananaPi ILI9881C
+   init data, not the uctronics data
+3. The uctronics init is NOT in a contiguous data table — it's
+   encoded as immediate values in the ARM64 instructions (mov/strb)
+4. The "JD9365DA" name in the symbol table was misleading
+
+### Next steps
+
+1. **Fork `panel-ilitek-ili9881c.c`** from Armbian kernel source
+2. **Add `uctronics_lcd_init[]`** from `ili9881c-init-extracted.c`
+   as a new panel entry with `uctronics,uctronics-lcd` compatible
+3. Add mode struct: 720x1280p60, 66 MHz, H:40/20/55, V:15/8/15
+4. Build as out-of-tree kernel module on the Rock
+5. Update DTS overlay compatible string
+6. Test — this should produce visible pixels!

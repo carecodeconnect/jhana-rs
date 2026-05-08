@@ -361,29 +361,29 @@ workloads.
 - [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
 - [ ] **Fix DSI display on Armbian image** — see `docs/08_DISPLAY.md`
-      Panel IC confirmed as **ILI9881C** (found page-switch commands
-      `9881 03/04/01/00` in old kernel binary at offset 16400696).
-      Armbian has `panel-ilitek-ili9881c.ko` — tested with `bananapi,lhr050h41`
-      compatible (720x1280): DSI connects, backlight brighter (IC partially
-      inits), but no image — wrong register init sequence for this panel.
-      **Current status:** Armbian overlay reverted to `rock-5a-radxa-display-8hd`
-      (backlight on, no image, fast boot). ILI9881C with BananaPi init causes
-      4-minute boot delay from DSI retries.
-      **Init sequence extracted** (2026-05-08): 188 register writes, 5 pages.
-      Saved at `hardware/uctronics-dsi/ili9881c-init-sequence.c`.
+      **Panel IC: ILI9881C** (confirmed 2026-05-08 by disassembly of
+      baseline image kernel). Previous "JD9365DA" identification was wrong —
+      the uctronics driver sends ILI9881C page-switch commands (0xFF 0x98
+      0x81 0xNN) via `mipi_dsi_dcs_write`, wrapped in a forked JD9365DA
+      driver framework.
+      **Correct init sequence extracted** (200 DCS write calls):
+      `hardware/uctronics-dsi/ili9881c-init-extracted.c`
+      Pages: 3 (GIP, 128 regs), 4 (power, 13), 1 (VCOM, 7), 0 (gamma, 45).
+      **Current status:** Armbian overlay uses `rock-5a-radxa-display-8hd`
+      (backlight on, no image, fast boot). Baseline image downloaded and
+      mounted on X61s for analysis.
       **Next steps:**
-      1. Swap Armbian microSD into Rock, boot, SSH in
-      2. Download `panel-ilitek-ili9881c.c` from Armbian kernel source
+      1. Fork `panel-ilitek-ili9881c.c` from Armbian kernel source
          (github.com/armbian/linux-rockchip, branch 6.1)
-      3. Add `uctronics_lcd_init[]` from `ili9881c-init-sequence.c` as
-         a new panel entry with `uctronics,uctronics-lcd` compatible
-      4. Add mode struct with 720x1280p60 timing (66 MHz, H:40/20/55, V:15/8/15)
-      5. Compile as out-of-tree kernel module (`make -C /lib/modules/.../build M=...`)
-      6. Patch 8HD overlay DTS: change compatible to `uctronics,uctronics-lcd`
-      7. Install module + overlay, reboot, test display
-      8. If working: add module to `/etc/modules-load.d/` for auto-load
-      Kernel headers already installed on Armbian (`linux-headers-vendor-rk35xx`).
-      Makefile and build infra in `hardware/uctronics-dsi/`.
+      2. Add `uctronics_lcd_init[]` from `ili9881c-init-extracted.c`
+         as new panel entry with `uctronics,uctronics-lcd` compatible
+      3. Add mode struct: 720x1280p60, 66 MHz, H:40/20/55, V:15/8/15
+      4. Build as out-of-tree module on Rock (`make -C /lib/modules/.../build`)
+      5. Update DTS overlay compatible to `uctronics,uctronics-lcd`
+      6. Install module + overlay, reboot, test display
+      7. If working: add to `/etc/modules-load.d/` for auto-load
+      Kernel headers already installed (`linux-headers-vendor-rk35xx`).
+      Build infra in `hardware/uctronics-dsi/Makefile`.
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)
