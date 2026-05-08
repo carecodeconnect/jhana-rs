@@ -360,30 +360,11 @@ workloads.
 - [ ] Download Piper model to new image (`~/models/vits-piper-en_US-lessac-medium/`)
 - [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
-- [ ] **Fix DSI display on Armbian image** — see `docs/08_DISPLAY.md`
-      **Panel IC: ILI9881C** (confirmed 2026-05-08 by disassembly of
-      baseline image kernel). Previous "JD9365DA" identification was wrong —
-      the uctronics driver sends ILI9881C page-switch commands (0xFF 0x98
-      0x81 0xNN) via `mipi_dsi_dcs_write`, wrapped in a forked JD9365DA
-      driver framework.
-      **Correct init sequence extracted** (200 DCS write calls):
-      `hardware/uctronics-dsi/ili9881c-init-extracted.c`
-      Pages: 3 (GIP, 128 regs), 4 (power, 13), 1 (VCOM, 7), 0 (gamma, 45).
-      **Current status:** Armbian overlay uses `rock-5a-radxa-display-8hd`
-      (backlight on, no image, fast boot). Baseline image downloaded and
-      mounted on X61s for analysis.
-      **Next steps:**
-      1. Fork `panel-ilitek-ili9881c.c` from Armbian kernel source
-         (github.com/armbian/linux-rockchip, branch 6.1)
-      2. Add `uctronics_lcd_init[]` from `ili9881c-init-extracted.c`
-         as new panel entry with `uctronics,uctronics-lcd` compatible
-      3. Add mode struct: 720x1280p60, 66 MHz, H:40/20/55, V:15/8/15
-      4. Build as out-of-tree module on Rock (`make -C /lib/modules/.../build`)
-      5. Update DTS overlay compatible to `uctronics,uctronics-lcd`
-      6. Install module + overlay, reboot, test display
-      7. If working: add to `/etc/modules-load.d/` for auto-load
-      Kernel headers already installed (`linux-headers-vendor-rk35xx`).
-      Build infra in `hardware/uctronics-dsi/Makefile`.
+- [x] **Fix DSI display on Armbian image** (2026-05-08) — see `docs/08_DISPLAY.md`
+      Panel IC is ILI9881C. Forked `panel-ilitek-ili9881c.ko` with correct
+      init sequence (200 DCS commands) extracted from baseline image kernel
+      via disassembly. Installed as `panel-radxa-display-8hd.ko` replacement.
+      Uses stock `rock-5a-radxa-display-8hd` overlay unchanged.
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)

@@ -1,4 +1,4 @@
-obj-m += panel-jadard-jd9365da-h3.o
+obj-m += panel-ilitek-ili9881c.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
