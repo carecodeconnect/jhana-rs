@@ -361,24 +361,27 @@ workloads.
 - [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
 - [ ] **Fix DSI display on Armbian image** — see `docs/08_DISPLAY.md`
-      Uctronics panel driver is proprietary (not in any public kernel tree).
-      Display timings extracted from old image. Custom DTS overlay created
-      at `hardware/uctronics-dsi/rock-5a-uctronics-dsi.dts` using
-      `simple-panel-dsi` generic driver with exact timings (720x1280p60,
-      66 MHz, 4 DSI lanes, 480 Mbps).
-      Steps to test:
-      1. Swap Armbian microSD back into Rock
-      2. SSH in, install `device-tree-compiler`
-      3. Compile overlay: `dtc -@ -I dts -O dtb -o rock-5a-uctronics-dsi.dtbo
-         hardware/uctronics-dsi/rock-5a-uctronics-dsi.dts`
-      4. Copy to `/boot/dtb/rockchip/overlay/`
-      5. Edit `/boot/armbianEnv.txt`: `overlays=rock-5a-uctronics-dsi`
-      6. Remove old overlay: delete `rock-5a-radxa-display-8hd` from overlays
-      7. Reboot and check display
-      8. If `simple-panel-dsi` not in kernel, try `panel-dsi` compatible
-      9. If neither works, the panel needs a DSI init command sequence
-         that only the proprietary driver has — may need to extract from
-         kernel binary or contact Useful Sensors
+      Panel IC confirmed as **ILI9881C** (found page-switch commands
+      `9881 03/04/01/00` in old kernel binary at offset 16400696).
+      Armbian has `panel-ilitek-ili9881c.ko` — tested with `bananapi,lhr050h41`
+      compatible (720x1280): DSI connects, backlight brighter (IC partially
+      inits), but no image — wrong register init sequence for this panel.
+      **Current status:** Armbian overlay reverted to `rock-5a-radxa-display-8hd`
+      (backlight on, no image, fast boot). ILI9881C with BananaPi init causes
+      4-minute boot delay from DSI retries.
+      **Next steps:**
+      1. Boot old image (backup microSD)
+      2. Extract full ILI9881C init command array from old kernel binary
+         — data is near offset 16400696 in vmlinuz, structured as
+         ILI9881 page commands (`98 81 XX`) + register writes
+      3. Fork `panel-ilitek-ili9881c.c` from Armbian kernel source
+      4. Add new panel entry with `uctronics,uctronics-lcd` compatible
+         and the extracted init sequence
+      5. Compile as out-of-tree kernel module on Armbian
+      6. Patch 8HD overlay DTS to use `uctronics,uctronics-lcd` compatible
+      7. Install module + overlay, reboot, test
+      Kernel headers already installed on Armbian (`linux-headers-vendor-rk35xx`).
+      Makefile and build infra in `hardware/uctronics-dsi/`.
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)
