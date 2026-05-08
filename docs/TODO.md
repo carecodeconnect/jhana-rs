@@ -360,20 +360,25 @@ workloads.
 - [ ] Download Piper model to new image (`~/models/vits-piper-en_US-lessac-medium/`)
 - [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
-- [ ] **Fix DSI display on Armbian image** — Uctronics panel not working.
-      The old Radxa image has a custom kernel panel driver `uctronics,uctronics-lcd`
-      (`CONFIG_DRM_PANEL_UCTRONICS_LCD=y`) baked into the kernel. The Armbian
-      vendor kernel 6.1.115 does not include this driver. The `rock-5a-radxa-display-8hd`
-      overlay uses a different panel (`radxa,display-8hd`, 800x1280) — wrong panel.
-      Full old device tree saved at `/tmp/rock-old-devicetree.dts` on X61s.
-      Options:
-      1. Build the Uctronics panel driver as a loadable kernel module for Armbian
-         — find source in Radxa's kernel tree (rockchip-linux/kernel), compile
-         against Armbian's 6.1.115 headers, load with `insmod`
-      2. Create a custom device tree overlay with a generic DSI panel driver
-         (`panel-dsi`) using the timing/init data from the old device tree
-      3. Use HDMI for display temporarily (plug in a monitor)
-      4. Work headless via SSH (display not needed for NPU testing)
+- [ ] **Fix DSI display on Armbian image** — see `docs/08_DISPLAY.md`
+      Uctronics panel driver is proprietary (not in any public kernel tree).
+      Display timings extracted from old image. Custom DTS overlay created
+      at `hardware/uctronics-dsi/rock-5a-uctronics-dsi.dts` using
+      `simple-panel-dsi` generic driver with exact timings (720x1280p60,
+      66 MHz, 4 DSI lanes, 480 Mbps).
+      Steps to test:
+      1. Swap Armbian microSD back into Rock
+      2. SSH in, install `device-tree-compiler`
+      3. Compile overlay: `dtc -@ -I dts -O dtb -o rock-5a-uctronics-dsi.dtbo
+         hardware/uctronics-dsi/rock-5a-uctronics-dsi.dts`
+      4. Copy to `/boot/dtb/rockchip/overlay/`
+      5. Edit `/boot/armbianEnv.txt`: `overlays=rock-5a-uctronics-dsi`
+      6. Remove old overlay: delete `rock-5a-radxa-display-8hd` from overlays
+      7. Reboot and check display
+      8. If `simple-panel-dsi` not in kernel, try `panel-dsi` compatible
+      9. If neither works, the panel needs a DSI init command sequence
+         that only the proprietary driver has — may need to extract from
+         kernel binary or contact Useful Sensors
 
 **Step 3: TTS — fork piper-rs with candle + rknn-rs**
 - [ ] Study piper-rs source (github.com/thewh1teagle/piper-rs)
