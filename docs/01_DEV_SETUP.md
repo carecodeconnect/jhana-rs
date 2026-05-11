@@ -5,14 +5,45 @@
 ### Option A: Router ethernet (current setup)
 
 Both the X61s and Rock 5A are plugged into the router. The Rock gets
-`192.168.1.102` via DHCP (hostname `rock-5a`) and has direct internet
-access. No manual network setup needed.
+an IP via DHCP. No manual network setup needed.
 
 ```bash
-sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102
+scripts/rock-ssh.sh
 ```
 
-### Option B: Direct ethernet (X61s to Rock, no router)
+The Rock IP is configured in `config.json` (single source of truth).
+All `scripts/rock-*.sh` scripts read from it automatically.
+
+### Option B: Tailscale (works from anywhere)
+
+Both the X61s and Rock are on the same Tailscale network. This works
+from any internet connection — no router or LAN needed.
+
+```bash
+ROCK_IP=rock-5a scripts/rock-ssh.sh
+```
+
+Or directly:
+```bash
+ssh root@rock-5a    # Tailscale SSH (no password needed)
+ssh ubuntu@100.103.3.6
+```
+
+| Device | Tailscale IP | Hostname |
+|--------|-------------|----------|
+| Rock 5A | 100.103.3.6 | rock-5a |
+| X61s | 100.120.162.61 | x61s |
+
+Tailscale was set up on the Rock on 2026-05-11 with `tailscale up --ssh`.
+The `--ssh` flag enables Tailscale SSH (no password/key needed between
+Tailscale devices). To re-authenticate if expired:
+```bash
+# On the Rock (via local SSH or console):
+sudo tailscale up --ssh
+# Opens a URL to approve in browser
+```
+
+### Option C: Direct ethernet (X61s to Rock, no router)
 
 When no router is available, connect the Rock directly to the X61s via
 ethernet. Requires manual DHCP setup on the laptop.
@@ -41,12 +72,12 @@ sudo apt install dnsmasq sshpass
 4. Verify the DHCP lease:
    ```bash
    cat /var/lib/misc/dnsmasq.leases
-   # Should show: rock-5a at 192.168.1.102
+   # Should show: rock-5a at some IP
    ```
 
-5. SSH in:
+5. Update `config.json` with the assigned IP, then SSH in:
    ```bash
-   sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102
+   scripts/rock-ssh.sh
    ```
 
 ---
@@ -210,18 +241,13 @@ it's too slow and the wrong architecture.
 
 3. **Sync** to the Rock via rsync (installed 2026-05-07 via `sudo apt install rsync`):
    ```bash
-   sshpass -p 'ubunturock' rsync -avz --exclude target/ \
-     -e "ssh -o StrictHostKeyChecking=no" \
-     ~/projects/jhana-rs/ ubuntu@192.168.1.102:~/jhana-rs/
+   scripts/rock-sync.sh
    ```
 
 4. **Build and run** on the Rock via SSH:
    ```bash
-   ssh ubuntu@192.168.1.102
-   cd ~/jhana-rs
-   cargo check   # verify on aarch64 before building
-   cargo build
-   cargo run
+   scripts/rock-build.sh   # cargo check + build + test
+   scripts/rock-run.sh     # launch TUI on display
    ```
 
 ### Alternative: edit directly on Rock via SSH
