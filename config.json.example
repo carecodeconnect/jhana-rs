@@ -1,0 +1,9 @@
+{
+  "rock": {
+    "ip": "192.168.1.XXX",
+    "tailscale_ip": "100.X.X.X",
+    "tailscale_hostname": "rock-5a",
+    "user": "ubuntu",
+    "password": "YOUR_PASSWORD"
+  }
+}
