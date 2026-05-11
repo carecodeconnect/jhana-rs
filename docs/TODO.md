@@ -354,12 +354,13 @@ workloads.
 - [ ] Convert Ministral 3B to .rkllm via rkllm-toolkit on X61s (no pre-built exists)
 - [ ] Benchmark Ministral 3B .rkllm vs Llama 3.2 3B .rkllm (meditation quality + tok/s)
 - [ ] Compare meditation text quality: Llama 3.2 3B (NPU) vs Ministral 3B (CPU)
-- [ ] Set up console font and dmesg suppression on new Armbian image
-      (see `docs/01_DEV_SETUP.md` — setfont, dmesg -n 1)
-- [ ] Install Piper TTS CLI on new image (`/usr/local/bin/piper`)
-- [ ] Download Piper model to new image (`~/models/vits-piper-en_US-lessac-medium/`)
-- [ ] Download SenseVoice RKNN model to new image (`~/models/sensevoice/`)
+- [x] Set up console font and dmesg suppression on new Armbian image (2026-05-11)
+      `fbcon=rotate:1` kernel param, TerminusBold 32x16, `dmesg -n 1` via rc.local
+- [x] Install Piper TTS CLI on new image (2026-05-11) — `/usr/local/bin/piper` + libs
+- [x] Download Piper model to new image (2026-05-11) — `~/models/vits-piper-en_US-lessac-medium/`
+- [x] Download SenseVoice RKNN model to new image (2026-05-11) — `~/models/sensevoice/`
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
+- [x] **Set up Tailscale on Rock** (2026-05-11) — `rock-5a` at `100.103.3.6`, SSH enabled
 - [x] **Fix DSI display on Armbian image** (2026-05-08) — see `docs/08_DISPLAY.md`
       Panel IC is ILI9881C. Forked `panel-ilitek-ili9881c.ko` with correct
       init sequence (200 DCS commands) extracted from baseline image kernel
