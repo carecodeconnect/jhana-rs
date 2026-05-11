@@ -86,10 +86,15 @@ Not recommended — dead project. Use Armbian instead.
 | Field | Value |
 |-------|-------|
 | Filename | `Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz` |
-| Download | <https://dl.armbian.com/rock-5a/Noble_vendor_minimal> |
+| Download | <https://dl.armbian.com/rock-5a/archive/Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz> |
 | SHA256 | `5ae0785a4f6e1421395a6b223328c2dac2b938263d8b5c001fb7d759245aca83` |
 | Compressed | 269 MB |
 | Verified | 2026-05-08, checksum matches |
+| Flashed | 2026-05-11, RKNPU v0.9.8 confirmed on Rock 5A |
+
+Note: The main download URL (`dl.armbian.com/rock-5a/`) redirects to a
+mirror that rotates old releases. Use the **archive** URL above — it
+has the exact verified image.
 
 ---
 
@@ -106,59 +111,109 @@ case must be opened to access it.
 
 ## Flash instructions
 
-### Step-by-step: flash Armbian to a new microSD card
+### Step-by-step: flash Armbian to microSD
 
 **What you need:**
-- A spare microSD card (8 GB+, ideally 32 GB)
-- A microSD-to-USB card reader for the X61s
-- A small screwdriver to open the Uctronics enclosure
+- A microSD card (8 GB+, ideally 32 GB) — **use a quality brand (SanDisk)**
+- A microSD card reader for the X61s (built-in or USB adapter)
+- A **5V/5A (25W)** USB-C power supply for the Rock (see power notes below)
 
 **On the X61s (ThinkPad, Ubuntu):**
 
 ```bash
-# 1. Download Armbian image
-wget https://dl.armbian.com/rock-5a/Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
+# 1. Download Armbian image (from archive — main URL rotates releases)
+wget https://dl.armbian.com/rock-5a/archive/Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
 
-# 2. Decompress (takes ~30s, produces ~1.5 GB .img file)
-xz -d Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
+# 2. Verify checksum
+sha256sum Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
+# Expected: 5ae0785a4f6e1421395a6b223328c2dac2b938263d8b5c001fb7d759245aca83
 
-# 3. Insert the NEW (spare) microSD card into USB reader on X61s
+# 3. Decompress (keep .xz as backup, produces ~1.6 GB .img file)
+xz -dk Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img.xz
 
-# 4. Find the device name
+# 4. Insert microSD card into card reader on X61s
+
+# 5. Find the device name
 lsblk
-# Look for the new disk (e.g. /dev/sdb — NOT /dev/sda which is your laptop!)
+# Look for the microSD (e.g. /dev/mmcblk0 — NOT /dev/sda which is your laptop!)
 
-# 5. Flash the image (REPLACE /dev/sdX with actual device!)
+# 6. Flash the image (REPLACE /dev/mmcblk0 with actual device!)
 sudo dd if=Armbian_26.2.1_Rock-5a_noble_vendor_6.1.115_minimal.img \
-  of=/dev/sdX bs=4M status=progress
+  of=/dev/mmcblk0 bs=4M status=progress
 sync
 
-# 6. Eject the card
-sudo eject /dev/sdX
+# 7. Verify the flash wrote correctly
+sudo fdisk -l /dev/mmcblk0
+# Should show: GPT, one 1.6G "Linux root (ARM-64)" partition
+# If it still shows the old partition layout, the flash failed — retry
+
+# 8. Configure headless first boot (skips keyboard/screen requirement)
+scripts/armbian-headless-setup.sh
+# Reads credentials from config.json, writes Armbian autoconfig, unmounts
 ```
 
-**Swap the cards on the Rock:**
+**Headless first boot:**
+
+The `armbian-headless-setup.sh` script writes an autoconfig file to
+`/root/.not_logged_in_yet` on the card. This tells Armbian to skip the
+interactive first-boot wizard and enable SSH immediately.
+
+**Note:** The autoconfig sets `PRESET_ROOT_PASSWORD` but Armbian may
+ignore it and keep the default root password `1234`. Try both passwords
+when connecting.
+
+**Move the card to the Rock:**
 
 1. Power off the Rock (unplug power cable)
-2. Open the Uctronics enclosure
-3. Remove the current 32 GB microSD card — **label it "BACKUP"**
-4. Insert the new Armbian microSD card
-5. Close the enclosure (loosely — you may need to swap back)
-6. Plug in power — Rock boots from the new card
+2. Open the Uctronics enclosure (if card is inside)
+3. Insert the Armbian microSD card
+4. Plug in power — Rock boots from the card
 
-**First boot (via SSH from X61s):**
-
-The Rock should get the same IP (192.168.1.102) via DHCP, but Armbian's
-default SSH may differ. Try:
+**Connect via SSH:**
 
 ```bash
-# Armbian default: root with password set on first boot
-# May need to connect a keyboard to the Rock's USB for first-time setup
-# Or try: ssh root@192.168.1.102 (default password: 1234)
+# Find the Rock's new IP (wait ~2 min for boot to complete)
+nmap -p 22 192.168.1.0/24 --open
+# Look for rock-5a.lan or an unfamiliar IP with port 22 open
+
+# Update config.json with the new IP, then:
+scripts/rock-ssh.sh
+
+# Or connect directly (try both passwords):
+sshpass -p '1234' ssh -o StrictHostKeyChecking=no root@<IP>
+sshpass -p 'ubunturock' ssh -o StrictHostKeyChecking=no root@<IP>
 ```
 
-If SSH doesn't work, connect a USB keyboard to the Rock and log in on
-the DSI display. Armbian prompts for root password on first boot.
+If SSH host key conflicts (WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED):
+```bash
+ssh-keygen -f ~/.ssh/known_hosts -R <IP>
+```
+
+### Power supply requirements
+
+The Rock 5A requires **5V/5A (25W)** via USB-C. Insufficient power causes
+boot failures:
+
+| Supply | Result |
+|--------|--------|
+| 5V/5A (25W) USB-C | Works — stable boot |
+| MacBook USB-C charger (USB-C PD) | Works — provides enough current |
+| 5V/4A (20W) USB-C | **Fails** — blue LED flashes, board powers off during boot |
+
+Armbian draws more power at boot than the old Radxa Ubuntu image because
+it initializes all 8 CPU cores, NPU, GPU, and Mali simultaneously.
+
+### MicroSD card compatibility
+
+Not all microSD cards work reliably with the Rock 5A:
+
+| Card | Result |
+|------|--------|
+| SanDisk 32GB (SDR104) | **Works** — reliable |
+| store.it 32GB | **Fails** — blue LED flashing, no boot |
+
+Use a quality brand (SanDisk, Samsung) for SBC boot media. Cheap/no-name
+cards often fail at the high-speed modes the Rock 5A negotiates.
 
 **Verify NPU driver:**
 ```bash
@@ -294,18 +349,18 @@ sudo dmesg -n 1
 **Back up everything from the current eMMC before flashing:**
 
 ```bash
-# From X61s, backup via SSH:
-sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102 \
-  "tar czf /tmp/home-backup.tar.gz -C /home ubuntu"
+# From X61s, backup via SSH (uses IP from config.json):
+scripts/rock-ssh.sh "tar czf /tmp/home-backup.tar.gz -C /home ubuntu"
 
-sshpass -p 'ubunturock' scp ubuntu@192.168.1.102:/tmp/home-backup.tar.gz .
+ROCK_IP=$(jq -r '.rock.ip' config.json)
+sshpass -p 'ubunturock' scp ubuntu@$ROCK_IP:/tmp/home-backup.tar.gz .
 
 # Or backup specific directories:
 sshpass -p 'ubunturock' rsync -avz \
-  ubuntu@192.168.1.102:~/models/ ./backup-models/
+  ubuntu@$ROCK_IP:~/models/ ./backup-models/
 
 sshpass -p 'ubunturock' rsync -avz \
-  ubuntu@192.168.1.102:~/jhana-rs/ ./backup-jhana-rs/
+  ubuntu@$ROCK_IP:~/jhana-rs/ ./backup-jhana-rs/
 ```
 
 Models to preserve:
