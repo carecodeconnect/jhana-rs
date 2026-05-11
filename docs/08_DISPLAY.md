@@ -41,11 +41,18 @@ sudo reboot
 `/boot/armbianEnv.txt` must have:
 ```
 overlays=rock-5a-radxa-display-8hd
+extraargs=cma=256M fbcon=rotate:1
 ```
 
-The stock `rock-5a-radxa-display-8hd` overlay provides the correct DSI
-subsystem setup (PHY, VOP routing, pinctrl, GPIO, backlight). Our forked
-module replaces only the panel driver, keeping the overlay unchanged.
+- `overlays=rock-5a-radxa-display-8hd` — the stock overlay provides the
+  correct DSI subsystem setup (PHY, VOP routing, pinctrl, GPIO, backlight).
+  Our forked module replaces only the panel driver, keeping the overlay
+  unchanged.
+- `fbcon=rotate:1` — rotates the framebuffer console 90 degrees clockwise.
+  Required because the DSI panel is 720x1280 (portrait) but mounted in
+  landscape orientation in the Uctronics enclosure. This is a kernel
+  parameter, not a runtime setting — writing to `/sys/class/graphics/fb0/rotate`
+  does NOT work on this kernel/driver combination.
 
 ## Panel IC: ILI9881C
 

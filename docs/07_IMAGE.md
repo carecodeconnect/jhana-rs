@@ -192,16 +192,18 @@ ssh-keygen -f ~/.ssh/known_hosts -R <IP>
 ### Power supply requirements
 
 The Rock 5A requires **5V/5A (25W)** via USB-C. Insufficient power causes
-boot failures:
+boot failures. A **MacBook Pro M1 Max USB-C charger** was used successfully
+to power the Rock with Armbian (NPU v0.9.8 confirmed working).
 
 | Supply | Result |
 |--------|--------|
-| 5V/5A (25W) USB-C | Works — stable boot |
-| MacBook USB-C charger (USB-C PD) | Works — provides enough current |
+| MacBook Pro M1 Max USB-C charger | **Works** — used for Armbian flash (2026-05-11) |
+| 5V/5A (25W) dedicated USB-C PSU | Works — Raspberry Pi 5 PSU is a good option |
 | 5V/4A (20W) USB-C | **Fails** — blue LED flashes, board powers off during boot |
 
-Armbian draws more power at boot than the old Radxa Ubuntu image because
-it initializes all 8 CPU cores, NPU, GPU, and Mali simultaneously.
+The old Radxa Ubuntu image booted on 20W/5V (4A), but Armbian draws more
+power at boot because it initializes all 8 CPU cores, NPU, GPU, and Mali
+simultaneously. The 20W supply cannot sustain the peak current.
 
 ### MicroSD card compatibility
 
