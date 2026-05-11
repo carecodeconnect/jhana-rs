@@ -360,7 +360,7 @@ workloads.
 - [x] Download Piper model to new image (2026-05-11) — `~/models/vits-piper-en_US-lessac-medium/`
 - [x] Download SenseVoice RKNN model to new image (2026-05-11) — `~/models/sensevoice/`
 - [ ] Test full pipeline on new image: STT (NPU) → LLM (NPU) → TTS (CPU) → display
-- [x] **Set up Tailscale on Rock** (2026-05-11) — `rock-5a` at `100.103.3.6`, SSH enabled
+- [x] **Set up Tailscale on Rock** (2026-05-11) — hostname `rock-5a`, SSH enabled
 - [x] **Fix DSI display on Armbian image** (2026-05-08) — see `docs/08_DISPLAY.md`
       Panel IC is ILI9881C. Forked `panel-ilitek-ili9881c.ko` with correct
       init sequence (200 DCS commands) extracted from baseline image kernel

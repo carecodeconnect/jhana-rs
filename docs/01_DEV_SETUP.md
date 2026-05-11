@@ -1,5 +1,16 @@
 # 01: Development Setup
 
+## Create config.json
+
+All `scripts/rock-*.sh` scripts read Rock connection details from
+`config.json` in the repo root. This file is gitignored (contains
+credentials). Copy the template and fill in your values:
+
+```bash
+cp config.json.example config.json
+# Edit config.json with your Rock's IP and credentials
+```
+
 ## SSH into the Rock 5A
 
 ### Option A: Router ethernet (current setup)
@@ -23,16 +34,12 @@ from any internet connection — no router or LAN needed.
 ROCK_IP=rock-5a scripts/rock-ssh.sh
 ```
 
-Or directly:
+Or directly via Tailscale hostname (no password needed):
 ```bash
-ssh root@rock-5a    # Tailscale SSH (no password needed)
-ssh ubuntu@100.103.3.6
+ssh root@rock-5a
 ```
 
-| Device | Tailscale IP | Hostname |
-|--------|-------------|----------|
-| Rock 5A | 100.103.3.6 | rock-5a |
-| X61s | 100.120.162.61 | x61s |
+Tailscale IPs and hostnames are in `config.json`.
 
 Tailscale was set up on the Rock on 2026-05-11 with `tailscale up --ssh`.
 The `--ssh` flag enables Tailscale SSH (no password/key needed between
@@ -96,10 +103,10 @@ sudo systemctl stop run-chatty-startup.service
 sudo systemctl disable run-chatty-startup.service
 ```
 
-Password for sudo: `ubunturock`
+The sudo password is the same as the user password in `config.json`.
 
-Note: the `ubuntu` user does not have passwordless sudo. You will need to
-type the password or use `echo 'ubunturock' | sudo -S <command>`.
+Note: on the old image the `ubuntu` user did not have passwordless sudo.
+On the fresh Armbian image (2026-05-11), passwordless sudo is configured.
 
 ### Restoring the service later
 
@@ -132,7 +139,7 @@ sudo systemctl start run-chatty-startup.service
 Once `run-chatty-startup.service` is stopped, pygame releases the DRM/KMS
 display. The getty on tty1 should become visible on the physical screen,
 showing a login prompt. You can log in directly on the device
-(`ubuntu` / `ubunturock`) or continue via SSH.
+(credentials in `config.json`) or continue via SSH.
 
 If the console doesn't appear after stopping the service, switch to tty1:
 ```bash

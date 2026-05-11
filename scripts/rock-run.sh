@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 "$SCRIPT_DIR/rock-ssh.sh" "
-  echo 'ubunturock' | sudo -S bash -c '
+  sudo bash -c '
     pkill jhana-rs 2>/dev/null; true
     dmesg --console-off
     echo -e \"\033c\" > /dev/tty1

@@ -44,8 +44,12 @@ cp scripts/pre-commit .git/hooks/pre-commit
 
 ## Rock access
 
+Rock IP, user, and password are in `config.json` (single source of truth).
+All `scripts/rock-*.sh` scripts read from it automatically.
+
 ```bash
-sshpass -p 'ubunturock' ssh ubuntu@192.168.1.83
+scripts/rock-ssh.sh          # interactive SSH
+scripts/rock-ssh.sh "cmd"    # run a command
 ```
 
-Or use `scripts/rock-ssh.sh`.
+To change the Rock IP, edit `config.json` — no other files need updating.

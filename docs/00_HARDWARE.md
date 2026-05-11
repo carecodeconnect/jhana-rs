@@ -147,10 +147,10 @@ enclosure's built-in USB hub.
 
 | Interface | Status |
 |-----------|--------|
-| eth0 | UP — connected to router at 192.168.1.102 |
+| eth0 | UP — connected to router via DHCP |
 | (no wifi) | Rock 5A does not have onboard WiFi |
 
-Access: `sshpass -p 'ubunturock' ssh ubuntu@192.168.1.102`
+Access: `scripts/rock-ssh.sh` (IP and credentials in `config.json`)
 
 ## OS / Image
 

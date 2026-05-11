@@ -179,9 +179,9 @@ nmap -p 22 192.168.1.0/24 --open
 # Update config.json with the new IP, then:
 scripts/rock-ssh.sh
 
-# Or connect directly (try both passwords):
-sshpass -p '1234' ssh -o StrictHostKeyChecking=no root@<IP>
-sshpass -p 'ubunturock' ssh -o StrictHostKeyChecking=no root@<IP>
+# Or connect directly (Armbian default root password is '1234',
+# or the password from config.json if autoconfig worked):
+ssh -o StrictHostKeyChecking=no root@<IP>
 ```
 
 If SSH host key conflicts (WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED):
@@ -351,18 +351,20 @@ sudo dmesg -n 1
 **Back up everything from the current eMMC before flashing:**
 
 ```bash
-# From X61s, backup via SSH (uses IP from config.json):
+# From X61s, backup via SSH (credentials from config.json):
 scripts/rock-ssh.sh "tar czf /tmp/home-backup.tar.gz -C /home ubuntu"
 
 ROCK_IP=$(jq -r '.rock.ip' config.json)
-sshpass -p 'ubunturock' scp ubuntu@$ROCK_IP:/tmp/home-backup.tar.gz .
+ROCK_USER=$(jq -r '.rock.user' config.json)
+ROCK_PASS=$(jq -r '.rock.password' config.json)
+sshpass -p "$ROCK_PASS" scp $ROCK_USER@$ROCK_IP:/tmp/home-backup.tar.gz .
 
 # Or backup specific directories:
-sshpass -p 'ubunturock' rsync -avz \
-  ubuntu@$ROCK_IP:~/models/ ./backup-models/
+sshpass -p "$ROCK_PASS" rsync -avz \
+  $ROCK_USER@$ROCK_IP:~/models/ ./backup-models/
 
-sshpass -p 'ubunturock' rsync -avz \
-  ubuntu@$ROCK_IP:~/jhana-rs/ ./backup-jhana-rs/
+sshpass -p "$ROCK_PASS" rsync -avz \
+  $ROCK_USER@$ROCK_IP:~/jhana-rs/ ./backup-jhana-rs/
 ```
 
 Models to preserve:

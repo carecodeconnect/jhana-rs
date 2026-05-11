@@ -541,7 +541,10 @@ llm.export_rkllm('Ministral-3B-Instruct_w8a8_rk3588.rkllm')
 "
 
 # Copy to Rock
-scp Ministral-3B-Instruct_w8a8_rk3588.rkllm ubuntu@192.168.1.102:~/models/
+# Copy to Rock (IP and user from config.json)
+scripts/rock-ssh.sh "true"  # verify connection
+scp Ministral-3B-Instruct_w8a8_rk3588.rkllm \
+  $(jq -r '.rock.user' config.json)@$(jq -r '.rock.ip' config.json):~/models/
 ```
 
 Expected file size: ~3.5–4 GB. This would allow direct comparison of

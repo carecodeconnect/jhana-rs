@@ -36,15 +36,15 @@ DURATION="${1:-60}"
   echo ''
 
   # Suppress kernel console messages
-  echo 'ubunturock' | sudo -S dmesg --console-off
+  sudo dmesg --console-off
 
   # Clear tty1
-  echo 'ubunturock' | sudo -S bash -c 'echo -e \"\033c\" > /dev/tty1'
+  sudo bash -c 'echo -e \"\033c\" > /dev/tty1'
 
   # Start ffmpeg recording in background
   # - Video: framebuffer capture from /dev/fb0
   # - Audio: Uctronics speaker output (card 2) or silence if unavailable
-  echo 'ubunturock' | sudo -S bash -c \"
+  sudo bash -c \"
     ffmpeg -y \\
       -f fbdev -framerate 10 -i /dev/fb0 \\
       -f alsa -ac 1 -ar 16000 -i hw:2,0 \\
@@ -59,7 +59,7 @@ DURATION="${1:-60}"
   sleep 1
 
   # Launch TUI on tty1
-  echo 'ubunturock' | sudo -S bash -c '
+  sudo bash -c '
     cd /home/ubuntu/jhana-rs && TERM=linux setsid ./target/debug/jhana-rs </dev/tty1 >/dev/tty1 2>/dev/tty1 &
     echo \$! > /tmp/jhana_demo.pid
   '

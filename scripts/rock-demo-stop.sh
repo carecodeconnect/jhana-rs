@@ -4,9 +4,12 @@
 # Stops ffmpeg and jhana-rs, lists recorded demos.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG="$SCRIPT_DIR/../config.json"
+ROCK_IP="${ROCK_IP:-$(jq -r '.rock.ip' "$CONFIG")}"
+ROCK_USER="$(jq -r '.rock.user' "$CONFIG")"
 
 "$SCRIPT_DIR/rock-ssh.sh" "
-  echo 'ubunturock' | sudo -S bash -c '
+  sudo bash -c '
     # Stop TUI
     kill \$(cat /tmp/jhana_demo.pid 2>/dev/null) 2>/dev/null; true
     # Stop recording (SIGINT for clean ffmpeg close)
@@ -21,4 +24,5 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
 echo "To download a demo to x61s:"
-echo "  sshpass -p 'ubunturock' scp ubuntu@192.168.1.102:~/jhana-rs/demos/demo_*.mp4 ."
+echo "  scripts/rock-ssh.sh 'ls ~/jhana-rs/demos/'"
+echo "  scp $ROCK_USER@$ROCK_IP:~/jhana-rs/demos/demo_*.mp4 ."
