@@ -1,0 +1,55 @@
+// Device tree overlay for Uctronics AI in a Box audio codec
+// Enables onboard speaker (MAX98357A I2S amp) and mic (DMIC)
+// on the Rock 5A running Armbian 26.2.1 (kernel 6.1.115-vendor-rk35xx)
+//
+// Hardware: MAX98357A Class D amp + digital MEMS mic on I2S2 bus
+// GPIO: sdmode=GPIO3_B5 (speaker amp enable, active high)
+//
+// Based on device tree from Radxa Ubuntu 22.04 baseline image.
+// See docs/09_AUDIO.md for hardware analysis.
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "radxa,rock-5a", "rockchip,rk3588s", "rockchip,rk3588";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			// MAX98357A I2S Class D amplifier (speaker)
+			max98357a: audio-codec-0 {
+				compatible = "maxim,max98357a";
+				sdmode-gpios = <&gpio3 13 0>;  /* GPIO3_B5 — speaker amp enable */
+				#sound-dai-cells = <0>;
+				status = "okay";
+			};
+
+			// Digital MEMS microphone
+			dmic: dmic-codec {
+				compatible = "dmic-codec";
+				#sound-dai-cells = <0>;
+				status = "okay";
+			};
+
+			// Sound card combining speaker + mic via I2S1_8CH (0xfe480000)
+			uctronics-sound {
+				compatible = "rockchip,multicodecs-card";
+				rockchip,card-name = "uctronics-codec";
+				rockchip,format = "i2s";
+				rockchip,mclk-fs = <256>;
+				rockchip,cpu = <&i2s1_8ch>;
+				rockchip,codec = <&max98357a>, <&dmic>;
+				status = "okay";
+			};
+		};
+	};
+
+	// Enable I2S1_8CH controller at 0xfe480000 (disabled by default in Armbian)
+	fragment@1 {
+		target-path = "/i2s@fe480000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};

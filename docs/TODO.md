@@ -366,16 +366,19 @@ workloads.
       init sequence (200 DCS commands) extracted from baseline image kernel
       via disassembly. Installed as `panel-radxa-display-8hd.ko` replacement.
       Uses stock `rock-5a-radxa-display-8hd` overlay unchanged.
-- [ ] **Fix Uctronics audio codec on Armbian** — the onboard mic+speaker
-      use a custom `uctronics,uctronics-codec` driver (not the es8316 headphone
-      jack). Old image has `CONFIG_SND_SOC_UCTRONICS_CODEC=y` built into kernel
-      plus `audio-codec-0` and `uctronics-sound` device tree nodes. Armbian
-      doesn't have this driver. Needs: extract kernel module from baseline image
-      (same approach as display fix), create DT overlay for the codec+sound nodes.
-      GPIO pins: sdmode=GPIO3_A5, gainsel_1=GPIO3_A3, gainsel_2=GPIO3_A5,
-      gainsel_3=GPIO3_A2. I2S bus: phandle 0x16f (find which i2s controller).
-      **Workaround:** Use es8316 headphone jack (card 0, `plughw:0,0`) with
-      external mic for testing until uctronics codec is fixed.
+- [ ] **Fix Uctronics audio codec on Armbian** (in progress 2026-05-11)
+      Onboard mic+speaker use MAX98357A amp + DMIC on I2S1_8CH (0xfe480000).
+      Armbian kernel missing `CONFIG_SND_SOC_MAX98357A` and `CONFIG_SND_SOC_DMIC`.
+      - [x] Build `snd-soc-max98357a.ko` out-of-tree module (2026-05-11)
+      - [x] Build `snd-soc-dmic.ko` out-of-tree module (2026-05-11)
+      - [ ] Create DT overlay enabling I2S1_8CH + MAX98357A + DMIC + sound card
+      - [ ] Compile overlay with `dtc`, install to `/boot/dtb/rockchip/overlay/`
+      - [ ] Load modules and overlay, verify new ALSA card appears
+      - [ ] Test speaker playback via new card
+      - [ ] Test mic capture via new card
+      - [ ] Persist modules (depmod) and overlay (armbianEnv.txt)
+      - [ ] Update `src/stt.rs` and `src/tts.rs` ALSA device constants
+      Source: `hardware/uctronics-audio/` (Makefile, overlay DTS, README)
 - [x] **Get TUI running on Armbian image** (2026-05-08)
       Rust toolchain installed, jhana-rs built, TUI running on DSI display.
       Piper TTS installed (`/usr/local/bin/piper` + espeak-ng-data symlink).

@@ -1,6 +1,6 @@
 # 09: Uctronics Audio Codec Fix for Armbian
 
-## Status: NOT WORKING (2026-05-08)
+## Status: IN PROGRESS (2026-05-11)
 
 The Uctronics AI in a Box onboard microphone and speaker do not work on
 Armbian 26.2.1. The es8316 headphone jack (card 0) works for external
@@ -101,18 +101,36 @@ CONFIG_SND_SIMPLE_CARD=y                 # available
 
 ## Fix plan
 
-### Option A: Build out-of-tree modules (recommended)
+### Option A: Build out-of-tree modules (recommended, in progress)
 
 Build `snd-soc-max98357a.ko` and `snd-soc-dmic.ko` from upstream kernel
-source as out-of-tree modules (same approach as the display fix). These
-are simple drivers (~100 lines each). Then create a DT overlay.
+source as out-of-tree modules (same approach as the display fix). Then
+create a DT overlay.
 
-1. Download `sound/soc/codecs/max98357a.c` and `sound/soc/codecs/dmic.c`
-   from the Armbian kernel source (linux-rockchip 6.1 branch)
-2. Build as out-of-tree modules on the Rock
-3. Create DT overlay adding `audio-codec-0` (MAX98357A compatible)
-   and `uctronics-sound` (multicodecs-card) nodes
-4. Install modules + overlay, test
+Source: `hardware/uctronics-audio/` — Makefile, DT overlay, README.
+
+**Progress (2026-05-11):**
+1. [x] Downloaded `max98357a.c` and `dmic.c` from Linux v6.1
+2. [x] Built both .ko modules successfully on Rock
+3. [x] Modules load cleanly (`modprobe snd-soc-max98357a`, `modprobe snd-soc-dmic`)
+4. [ ] **DT overlay broke networking** — first attempt (`uctronics-audio.dtbo`)
+       caused the Rock to boot without ethernet. Overlay was reverted.
+       The overlay needs debugging — likely wrong I2S node reference
+       (`i2s1_8ch` alias for `i2s@fe480000`), or a dependency conflict
+       with the ethernet DMA controller. Speaker pop/click was heard on
+       reboot, suggesting the MAX98357A sdmode GPIO _is_ being toggled.
+5. [ ] Fix DT overlay — investigate correct I2S node, test incrementally
+6. [ ] Verify new ALSA card appears with speaker + mic
+7. [ ] Test playback and capture
+
+**Troubleshooting the DT overlay failure:**
+- If the overlay breaks boot/networking, pull the microSD, mount on X61s,
+  and edit `/boot/armbianEnv.txt` to remove `uctronics-audio` from the
+  `overlays=` line. If SSH is unreachable but TUI shows on display, the
+  board booted but networking failed — the overlay is the cause.
+- Test overlay changes incrementally: try enabling just I2S first, then
+  add codecs, then add sound card node.
+- Use `ssh root@rock-5a` (Tailscale) as fallback when LAN SSH fails.
 
 ### Option B: Extract uctronics codec from baseline kernel
 
@@ -127,10 +145,17 @@ Enable `CONFIG_SND_SOC_MAX98357A=m` and `CONFIG_SND_SOC_DMIC=m` in the
 Armbian kernel config and rebuild. Most reliable but requires full
 kernel build infrastructure.
 
-## Workaround
+## Known issues
 
-No external mic available. Audio testing blocked until uctronics codec
-is fixed.
+### Speaker pop/click on boot and reboot
+
+The MAX98357A amp produces an audible pop/click when the sdmode GPIO
+toggles (amp power on/off). This was heard on reboot after installing
+the out-of-tree modules (2026-05-11). The old Radxa image had the same
+issue — the original Python app's `configure_devices.sh` managed the
+amp enable timing. Fix: control sdmode GPIO sequencing in the driver
+or add a startup delay. Low priority — cosmetic only, not a functional
+bug.
 
 ## ALSA mixer notes (es8316, card 0)
 
