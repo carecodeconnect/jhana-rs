@@ -1,0 +1,23 @@
+[Unit]
+Description=jhana-rs meditation TUI
+After=multi-user.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/ubuntu/jhana-rs
+ExecStartPre=/bin/bash -c 'dmesg -n 1; echo -e "\\033c" > /dev/tty1; setfont /usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz'
+ExecStart=/home/ubuntu/jhana-rs/target/debug/jhana-rs
+Environment=TERM=linux
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

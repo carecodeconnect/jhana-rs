@@ -344,6 +344,49 @@ sudo setupcon
 sudo dmesg -n 1
 ```
 
+### 9. Install jhana-rs systemd service
+
+The TUI runs as a systemd service on tty1, replacing the default login
+screen (getty). It starts automatically on boot and restarts on failure.
+
+```bash
+# Copy service file (from synced repo)
+sudo cp ~/jhana-rs/hardware/jhana-rs.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Disable getty on tty1 (jhana-rs takes over the display)
+sudo systemctl disable getty@tty1.service
+
+# Enable and start jhana-rs
+sudo systemctl enable jhana-rs.service
+sudo systemctl start jhana-rs.service
+
+# Verify
+sudo systemctl status jhana-rs.service
+```
+
+The service:
+- Runs as root on `/dev/tty1` (needed for DRM/KMS framebuffer access)
+- Sets console font and suppresses kernel messages before launch
+- Conflicts with `getty@tty1` (only one can own tty1)
+- Restarts automatically on crash (5s delay)
+
+**To temporarily stop the TUI for development:**
+```bash
+sudo systemctl stop jhana-rs.service
+# getty will NOT restart automatically — use SSH for access
+# To restore login screen: sudo systemctl start getty@tty1.service
+```
+
+**To update and restart after a new build:**
+```bash
+scripts/rock-sync.sh
+scripts/rock-ssh.sh "source ~/.cargo/env && cd ~/jhana-rs && cargo build"
+scripts/rock-ssh.sh "sudo systemctl restart jhana-rs.service"
+```
+
+The service file source is at `hardware/jhana-rs.service` in the repo.
+
 ---
 
 ## Backup before flashing
