@@ -367,18 +367,27 @@ workloads.
       via disassembly. Installed as `panel-radxa-display-8hd.ko` replacement.
       Uses stock `rock-5a-radxa-display-8hd` overlay unchanged.
 - [ ] **Fix Uctronics audio codec on Armbian** (in progress 2026-05-11)
-      Onboard mic+speaker use MAX98357A amp + DMIC on I2S1_8CH (0xfe480000).
-      Armbian kernel missing `CONFIG_SND_SOC_MAX98357A` and `CONFIG_SND_SOC_DMIC`.
-      - [x] Build `snd-soc-max98357a.ko` out-of-tree module (2026-05-11)
-      - [x] Build `snd-soc-dmic.ko` out-of-tree module (2026-05-11)
-      - [ ] Create DT overlay enabling I2S1_8CH + MAX98357A + DMIC + sound card
-      - [ ] Compile overlay with `dtc`, install to `/boot/dtb/rockchip/overlay/`
-      - [ ] Load modules and overlay, verify new ALSA card appears
-      - [ ] Test speaker playback via new card
-      - [ ] Test mic capture via new card
-      - [ ] Persist modules (depmod) and overlay (armbianEnv.txt)
+      Onboard mic+speaker use a custom Uctronics codec (NOT standard MAX98357A).
+      The `uctronics,uctronics-codec` driver is proprietary, baked into the
+      Useful Sensors baseline image kernel. Must extract and rebuild — same
+      approach that worked for the display driver.
+      - [x] Build standard MAX98357A + DMIC modules (2026-05-11) — ABANDONED,
+            hardware is not standard MAX98357A (has extra gain GPIOs)
+      - [x] DT overlay attempt broke networking — reverted (2026-05-11)
+      - [x] Documented original AI in a Box audio setup from GitHub repo
+      - [ ] Download baseline image (`ai_in_a_box_baseline_16gb_20240125.img.gz`)
+            to X61s (2.4 GB, essential for reverse engineering — also used for
+            display driver extraction). May already be downloaded.
+      - [ ] Mount baseline image, extract vmlinuz + System.map
+      - [ ] Find `uctronics_codec` symbols in System.map
+      - [ ] Disassemble codec driver on Rock (native `objdump`, same as display)
+      - [ ] Rewrite as loadable .ko module for kernel 6.1.115-vendor-rk35xx
+      - [ ] Create DT overlay (audio-codec-0 + uctronics-sound + enable I2S1_8CH)
+      - [ ] Install module + overlay, verify ALSA card appears
+      - [ ] Test speaker playback and mic capture
+      - [ ] Respect audio input→output ordering (see `docs/09_AUDIO.md`)
       - [ ] Update `src/stt.rs` and `src/tts.rs` ALSA device constants
-      Source: `hardware/uctronics-audio/` (Makefile, overlay DTS, README)
+      See `docs/09_AUDIO.md` for full analysis and references.
 - [x] **Get TUI running on Armbian image** (2026-05-08)
       Rust toolchain installed, jhana-rs built, TUI running on DSI display.
       Piper TTS installed (`/usr/local/bin/piper` + espeak-ng-data symlink).

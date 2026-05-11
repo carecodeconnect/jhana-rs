@@ -23,6 +23,76 @@ image has:
 Armbian doesn't have this driver or device tree nodes. Only the es8316
 codec loads (card 0: `rockchip-es8316`).
 
+## Original AI in a Box audio setup
+
+Source: [usefulsensors/ai_in_a_box](https://github.com/usefulsensors/ai_in_a_box)
+(also at `moonshine-ai/ai_in_a_box`). Local copy: `~/projects/ai_in_a_box/`.
+
+### Baseline image
+
+The audio hardware requires a **custom baseline image** from Useful Sensors
+that has the Uctronics kernel drivers and device tree baked in:
+
+```
+https://storage.googleapis.com/download.usefulsensors.com/ai_in_a_box/ai_in_a_box_baseline_16gb_20240125.img.gz
+```
+
+This image (Radxa Ubuntu 22.04, kernel 5.10.110-102-rockchip) includes:
+- `CONFIG_SND_SOC_UCTRONICS_CODEC=y` — custom codec driver built into kernel
+- Device tree nodes for `audio-codec-0` and `uctronics-sound`
+- Custom display driver (`CONFIG_DRM_PANEL_UCTRONICS_LCD=y`)
+
+**The audio driver source is proprietary and not in the AI in a Box repo.**
+The repo only contains application code, not kernel drivers. The driver
+is baked into the baseline image kernel.
+
+### PulseAudio requirement
+
+The original setup uses PulseAudio, not raw ALSA:
+
+```bash
+# From run_chatty.sh:
+sudo pulseaudio --start
+./configure_devices.sh    # sets default source/sink
+```
+
+Audio devices appear as:
+- Input: `alsa_input.platform-uctronics-sound.stereo-fallback`
+- Output: `alsa_output.platform-uctronics-sound.stereo-fallback`
+
+### Audio input/output ordering constraint
+
+**Audio input must be configured before audio output.** The original code
+enforces this with a signal file:
+
+1. `recorder.py` opens mic input stream first (`sd.InputStream`)
+2. Creates `/tmp/audio_input_running.bool` when input is ready
+3. `tts.py` waits for that file before opening output stream (`sd.OutputStream`)
+
+This ordering is required by the Uctronics audio driver — opening output
+before input causes failures.
+
+### configure_devices.sh behavior
+
+Sets PulseAudio defaults and volumes:
+- Detects USB audio devices (experimental, not reliable)
+- Sets uctronics mic input to max volume (`0xFFFF`)
+- Sets uctronics speaker output to max volume, `amixer -c 2 sset DAC 100%`
+- Non-uctronics devices get lower default volumes
+
+### Key finding: NOT a standard MAX98357A
+
+The `uctronics,uctronics-codec` driver is **not a standard MAX98357A +
+DMIC combination**. It is a custom Uctronics driver that:
+- Has `gainsel_1/2/3` GPIOs (3-bit gain selection) — MAX98357A only has sdmode
+- Wraps both speaker amp and MEMS mic into a single ALSA card
+- Has specific input/output ordering requirements
+- Uses a proprietary codec implementation baked into the kernel
+
+Using separate upstream `snd-soc-max98357a.ko` + `snd-soc-dmic.ko` is
+unlikely to work correctly because the hardware wiring and control scheme
+differ from standard MAX98357A.
+
 ## Old image audio device tree
 
 From `hardware/uctronics-dsi/radxa-ubuntu-22.04-full.dts`:
@@ -30,7 +100,7 @@ From `hardware/uctronics-dsi/radxa-ubuntu-22.04-full.dts`:
 ```dts
 audio-codec-0 {
     compatible = "uctronics,uctronics-codec";
-    sdmode-gpios = <&gpio3 13 0>;     /* GPIO3_A5 — speaker amp enable */
+    sdmode-gpios = <&gpio3 13 0>;     /* GPIO3_B5 — speaker amp enable */
     gainsel_1-gpios = <&gpio3 3 0>;   /* GPIO3_A3 — gain select 1 */
     gainsel_2-gpios = <&gpio3 5 0>;   /* GPIO3_A5 — gain select 2 */
     gainsel_3-gpios = <&gpio3 2 0>;   /* GPIO3_A2 — gain select 3 */
@@ -43,7 +113,7 @@ uctronics-sound {
     rockchip,card-name = "uctronics-codec";
     rockchip,format = "i2s";
     rockchip,mclk-fs = <256>;
-    rockchip,cpu = <&i2s_bus>;        /* phandle 0x16f — need to identify */
+    rockchip,cpu = <&i2s_bus>;        /* phandle 0x16f — I2S1_8CH at 0xfe480000 */
     rockchip,codec = <&audio_codec_0>;
     io-channels = <&saradc 3>;
     io-channel-names = "adc-detect";
@@ -73,19 +143,18 @@ Missing: uctronics-codec (card 2 on old image)
 ## Hardware identification
 
 The `uctronics,uctronics-codec` driver has GPIO pins for:
-- `sdmode` (GPIO3_A5) — speaker amplifier enable (Class D shutdown pin)
+- `sdmode` (GPIO3_B5) — speaker amplifier enable (Class D shutdown pin)
 - `gainsel_1/2/3` (GPIO3_A3/A5/A2) — 3-bit gain selection
 
-This pattern matches a **MAX98357A** (or similar I2S Class D amp) for
-the speaker, plus a **digital MEMS microphone** on the same I2S bus.
-The custom driver is likely a thin wrapper combining both into one
-ALSA card.
+This is similar to a MAX98357A but with additional gain control GPIOs
+that standard MAX98357A does not have. The custom driver wraps both
+speaker amp and MEMS mic into one ALSA card.
 
 ### I2S bus
 
-The uctronics codec uses **I2S2 at `0xfe480000`** (`rk3588-i2s-tdm`),
-separate from the es8316's I2S controller. Pinctrl phandles: `0xf7`,
-`0xf8`, `0xf9`, `0xfa`. 2-channel playback + 2-channel capture.
+The uctronics codec uses **I2S1_8CH at `0xfe480000`** (`rk3588-i2s-tdm`),
+separate from the es8316's I2S controller. This is aliased as `i2s1_8ch`
+in the Armbian device tree. It is **disabled** by default in Armbian.
 
 ## Armbian kernel audio support
 
@@ -101,61 +170,83 @@ CONFIG_SND_SIMPLE_CARD=y                 # available
 
 ## Fix plan
 
-### Option A: Build out-of-tree modules (recommended, in progress)
+### Option B: Extract uctronics codec from baseline kernel (RECOMMENDED)
 
-Build `snd-soc-max98357a.ko` and `snd-soc-dmic.ko` from upstream kernel
-source as out-of-tree modules (same approach as the display fix). Then
-create a DT overlay.
+Same approach as the display fix — extract the `snd-soc-uctronics-codec`
+driver from the baseline image kernel (`5.10.110-102-rockchip`). This is
+now the recommended approach after discovering that the hardware is NOT
+a standard MAX98357A + DMIC.
 
-Source: `hardware/uctronics-audio/` — Makefile, DT overlay, README.
+**Steps:**
+1. Mount the baseline image (`ai_in_a_box_baseline_16gb_20240125.img.gz`)
+2. Extract vmlinuz + System.map (same as display fix)
+3. Find `uctronics_codec` symbols in System.map
+4. Disassemble the codec driver (native `objdump` on Rock)
+5. Rewrite as a loadable kernel module for 6.1.115-vendor-rk35xx
+6. Create DT overlay with `audio-codec-0` and `uctronics-sound` nodes
+7. Enable I2S1_8CH (`i2s@fe480000`) in the overlay
+8. Install module + overlay, test
 
-**Progress (2026-05-11):**
-1. [x] Downloaded `max98357a.c` and `dmic.c` from Linux v6.1
-2. [x] Built both .ko modules successfully on Rock
-3. [x] Modules load cleanly (`modprobe snd-soc-max98357a`, `modprobe snd-soc-dmic`)
-4. [ ] **DT overlay broke networking** — first attempt (`uctronics-audio.dtbo`)
-       caused the Rock to boot without ethernet. Overlay was reverted.
-       The overlay needs debugging — likely wrong I2S node reference
-       (`i2s1_8ch` alias for `i2s@fe480000`), or a dependency conflict
-       with the ethernet DMA controller. Speaker pop/click was heard on
-       reboot, suggesting the MAX98357A sdmode GPIO _is_ being toggled.
-5. [ ] Fix DT overlay — investigate correct I2S node, test incrementally
-6. [ ] Verify new ALSA card appears with speaker + mic
-7. [ ] Test playback and capture
+**Baseline image download:**
+```bash
+curl -L -O https://storage.googleapis.com/download.usefulsensors.com/ai_in_a_box/ai_in_a_box_baseline_16gb_20240125.img.gz
+```
 
-**Troubleshooting the DT overlay failure:**
-- If the overlay breaks boot/networking, pull the microSD, mount on X61s,
-  and edit `/boot/armbianEnv.txt` to remove `uctronics-audio` from the
-  `overlays=` line. If SSH is unreachable but TUI shows on display, the
-  board booted but networking failed — the overlay is the cause.
-- Test overlay changes incrementally: try enabling just I2S first, then
-  add codecs, then add sound card node.
-- Use `ssh root@rock-5a` (Tailscale) as fallback when LAN SSH fails.
+This is the same image used for the display fix — it may already be
+downloaded. The display driver was at `jadard_jd9365da_enable` in
+System.map; the audio codec will be near `uctronics_codec`.
 
-### Option B: Extract uctronics codec from baseline kernel
+### Option A: Build standard MAX98357A + DMIC modules (ABANDONED)
 
-Same approach as the display fix — disassemble the built-in driver from
-the baseline image vmlinuz. More complex than Option A since we'd need
-to reverse-engineer a complete codec driver, but guaranteed to match the
-original behavior.
+Built `snd-soc-max98357a.ko` and `snd-soc-dmic.ko` from upstream kernel
+source. Modules compile and load, but:
+- The hardware is NOT a standard MAX98357A (has extra gain GPIOs)
+- The DT overlay broke networking on first attempt
+- Even if the overlay worked, standard drivers likely won't match the
+  Uctronics hardware wiring
+
+Source files still in `hardware/uctronics-audio/` for reference.
 
 ### Option C: Recompile Armbian kernel
 
-Enable `CONFIG_SND_SOC_MAX98357A=m` and `CONFIG_SND_SOC_DMIC=m` in the
-Armbian kernel config and rebuild. Most reliable but requires full
-kernel build infrastructure.
+Enable the Uctronics codec in the Armbian kernel config and rebuild.
+Most reliable but requires full kernel build infrastructure and the
+Uctronics driver source (which is proprietary).
 
 ## Known issues
 
 ### Speaker pop/click on boot and reboot
 
-The MAX98357A amp produces an audible pop/click when the sdmode GPIO
+The speaker amp produces an audible pop/click when the sdmode GPIO
 toggles (amp power on/off). This was heard on reboot after installing
 the out-of-tree modules (2026-05-11). The old Radxa image had the same
 issue — the original Python app's `configure_devices.sh` managed the
 amp enable timing. Fix: control sdmode GPIO sequencing in the driver
 or add a startup delay. Low priority — cosmetic only, not a functional
 bug.
+
+### Audio input must start before output
+
+The original AI in a Box enforces mic input → speaker output ordering.
+The jhana-rs code should respect this constraint once the audio codec
+is working. See `recorder.py` and `tts.py` in the AI in a Box repo.
+
+## Troubleshooting
+
+### DT overlay breaks networking
+
+If an audio overlay breaks boot/networking:
+1. Pull the microSD, mount on X61s
+2. Edit `/boot/armbianEnv.txt` — remove the audio overlay from `overlays=`
+3. Unmount, put card back in Rock, reboot
+
+If SSH is unreachable but TUI shows on display, the board booted but
+networking failed — the overlay is the cause.
+
+### Fallback SSH access
+
+- `ssh root@rock-5a` via Tailscale when LAN SSH fails
+- If Tailscale also fails, pull the card and edit boot config
 
 ## ALSA mixer notes (es8316, card 0)
 
@@ -169,3 +260,10 @@ Testing showed the analog inputs capture only noise (not connected to
 the onboard mic). The DMIC input captured signal but it's from the
 es8316's DMIC pins, not the Uctronics board mic — they're different
 hardware.
+
+## References
+
+- [usefulsensors/ai_in_a_box](https://github.com/usefulsensors/ai_in_a_box) — original Python app
+- [moonshine-ai/ai_in_a_box](https://github.com/moonshine-ai/ai_in_a_box) — mirror
+- [Baseline image](https://storage.googleapis.com/download.usefulsensors.com/ai_in_a_box/ai_in_a_box_baseline_16gb_20240125.img.gz) — 2.4 GB, contains custom kernel with audio + display drivers
+- Local copy of AI in a Box: `~/projects/ai_in_a_box/`
