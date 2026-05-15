@@ -7,11 +7,17 @@
 #   scripts/rock-stats.sh            # one-shot snapshot
 #   scripts/rock-stats.sh watch      # loop every 2 s (Ctrl-C to stop)
 #   scripts/rock-stats.sh watch 5    # loop every 5 s
+#
+# In watch mode the snapshot is also appended to
+# ${ROCK_STATS_LOG:-/tmp/rock-stats.log} so you can inspect the
+# session after the fact (e.g. for plotting NPU usage during a
+# meditation run).
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-once}"
 INTERVAL="${2:-2}"
+LOG_PATH="${ROCK_STATS_LOG:-/tmp/rock-stats.log}"
 
 # All probing happens on the Rock in one SSH session per snapshot so we
 # don't pay the SSH handshake cost on every loop iteration when watching.
@@ -103,9 +109,15 @@ case "$MODE" in
     snapshot
     ;;
   watch)
+    : > "$LOG_PATH"
+    echo "logging snapshots to $LOG_PATH (also shown on screen)" >&2
+    sleep 1
     while true; do
+      OUT=$(snapshot)
       clear
-      snapshot
+      printf '%s\n' "$OUT"
+      printf '\n[log appended to %s]\n' "$LOG_PATH"
+      printf '%s\n' "$OUT" >> "$LOG_PATH"
       sleep "$INTERVAL"
     done
     ;;

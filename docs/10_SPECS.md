@@ -86,6 +86,86 @@ Notes:
   jhana-mistral training data) into a local vector store the agent
   can retrieve from — we may use it under whichever harness we pick.
 
+### Streaming pipeline (STT → LLM → TTS) and async architecture
+
+The current jhana-rs pipeline is **per-utterance batched** with
+`std::thread + mpsc::channel`:
+
+1. `arecord` → `/tmp/jhana_stt.wav` (5 s native S32_LE 48 kHz)
+2. `ffmpeg` resample → `/tmp/jhana_stt_16k.wav`
+3. `svs.infer_file()` → full transcript
+4. `LlmStreamingThread` streams sentences over `mpsc::Sender<LlmOutput>`
+5. Each sentence → `espeak-ng` → `/tmp/jhana_tts.wav` → `aplay`
+
+This works but has two costs:
+
+- **STT is blocking**: no captions are visible while the user is
+  speaking; the screen is empty until the full 5 s clip is recorded
+  *and* SenseVoice returns.
+- **No backpressure**: if `aplay` lags the LLM, sentences pile up in
+  the channel buffer.
+
+#### Target: tokio + `Stream`-based pipeline
+
+```
+mic-stream  ▶  STT-stream  ▶  text-stream  ▶  LLM-stream  ▶  sentence-stream  ▶  TTS-stream  ▶  audio-stream  ▶  aplay
+```
+
+Each stage is a `futures::Stream`; downstream backpressure flows
+backwards via the stream contract. Implementation switches from
+`std::thread` to `tokio::task::spawn`, and from `mpsc::channel` to
+`tokio::sync::mpsc` + `tokio_stream::wrappers::ReceiverStream`.
+
+This shape matches:
+
+- **[Rig](https://www.rig.rs)** — Rust, sync trait `Stream` based.
+  Each agent step exposes `Stream<Item = T>`. STT yields partial
+  transcripts, LLM yields tokens, TTS yields audio chunks.
+  Single-binary fit; natural pair with `rkllm-rs` for the LLM stage.
+- **[LangGraph](https://github.com/langchain-ai/langgraph)** —
+  Python directed graph of async-iterator nodes (`astream_events`).
+  Battle-tested; brings Python.
+- **[pi-agent-core](https://github.com/earendil-works/pi-mono/tree/main/packages/agent)**
+  — TS/Node, async generator tools via Node Streams API. Matches
+  the Pi harness path documented below.
+
+For an offline cyberbox we prefer **Rig** (Rust, single binary,
+zero daemon) for the in-Rust streaming layer, while keeping the
+door open for `pi-agent-core` as the on-top harness if/when we
+adopt the Node agent runtime.
+
+#### Captioning during STT (streaming ASR)
+
+The current SenseVoiceSmall encoder is non-causal — it needs the
+entire utterance before emitting tokens, so live captions aren't
+possible with it. Two viable swaps for streaming STT on the
+RK3588 NPU:
+
+- **[Moonshine streaming](https://github.com/usefulsensors/moonshine)**
+  — Useful Sensors' efficient streaming ASR. Tiny (~27 M params),
+  much faster than Whisper-tiny at the same accuracy. RKNN
+  conversions are available; quality is benchmark-comparable.
+  Pairs naturally with the streaming-pipeline target above.
+- **online-zipformer** via RKNN — referenced in
+  [05_NPU.md](05_NPU.md) under sherpa-onnx; needs `.rknn` model
+  conversion. Lower-level option if Moonshine doesn't fit.
+
+User-visible win: a live caption strip appears under the mic icon
+during recording, both as a UX improvement and as a debugging
+surface (the user can see when the model mis-transcribes them and
+re-press immediately, rather than wait the 5 + 7 s for SenseVoice
+batch output).
+
+Plan:
+
+1. Land the tokio + `Stream` refactor while keeping SenseVoice as
+   the final-pass ASR (so we keep current accuracy).
+2. Add Moonshine streaming as a second ASR stage that emits partial
+   captions to the TUI's caption strip.
+3. When the user releases the button (or VAD detects silence),
+   commit the final SenseVoice result as the canonical transcript
+   and feed it to the LLM.
+
 ### Pi adaptation plan (2026-05-15, after looking at the actual repos)
 
 `pi` lives locally at `/mnt/data/projects/pi`
