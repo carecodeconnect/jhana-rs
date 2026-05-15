@@ -12,6 +12,7 @@
 mod config;
 mod gpio;
 mod llm;
+mod openai_types;
 mod stt;
 mod tts;
 mod ui;

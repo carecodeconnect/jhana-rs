@@ -41,6 +41,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+#[path = "../openai_types.rs"]
+mod openai_types;
+
+use openai_types::{
+    ChatMessage as CanonicalMessage, Role, ToolCall, ToolCallFunction, ToolDef, WireContent,
+};
+
 const DEFAULT_MODEL: &str = "/home/ubuntu/models/Qwen3-1.7B_w8a8_g128_rk3588.rkllm";
 const DEFAULT_ALIAS: &str = "qwen3-1.7b";
 
@@ -49,13 +56,19 @@ const DEFAULT_ALIAS: &str = "qwen3-1.7b";
 /// blocking task. Matches the pattern in `src/llm.rs`.
 static MODEL: OnceLock<LLMHandle> = OnceLock::new();
 
-// ---------- OpenAI request/response types (minimal subset) ----------
+// ---------- Wire types (request envelope + response envelope only) ----------
+//
+// Canonical `ChatMessage`, `Role`, `ToolCall`, `ToolDef` etc. live in
+// `src/openai_types.rs` (shared with the agent loop). The shim owns
+// only the HTTP-specific request and response envelopes plus a
+// wire-decode `WireChatMessage` that accepts OpenAI's array-form
+// content and then flattens to canonical.
 
 #[derive(Debug, Deserialize)]
 struct ChatCompletionRequest {
     #[allow(dead_code)] // we serve a single model; field accepted but ignored
     model: Option<String>,
-    messages: Vec<ChatMessage>,
+    messages: Vec<WireChatMessage>,
     #[serde(default)]
     tools: Vec<ToolDef>,
     /// `auto`, `none`, `required`, or a forced tool — we honour the
@@ -76,17 +89,14 @@ struct ChatCompletionRequest {
     stream: Option<bool>,
 }
 
+/// Request-side message shape. Accepts OpenAI's two `content` forms
+/// (plain string or array of content parts) via `WireContent`; we
+/// flatten to canonical `ChatMessage` for everything downstream.
 #[derive(Debug, Deserialize)]
-struct ChatMessage {
+struct WireChatMessage {
     role: String,
-    /// OpenAI accepts two shapes here: a plain string, or an array of
-    /// content parts like `[{"type":"text","text":"..."}, ...]` (the
-    /// multimodal/structured form pi and recent clients use). We accept
-    /// both via an untagged enum, then flatten down to a single string
-    /// because Qwen3-1.7B is text-only and we don't render images.
-    /// May be missing on assistant turns that only contain tool_calls.
     #[serde(default)]
-    content: Option<MessageContent>,
+    content: Option<WireContent>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -95,53 +105,33 @@ struct ChatMessage {
     tool_calls: Option<Vec<Value>>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum MessageContent {
-    Text(String),
-    Parts(Vec<ContentPart>),
-}
-
-#[derive(Debug, Deserialize)]
-struct ContentPart {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    text: Option<String>,
-    // image_url / input_audio / etc — ignored for text-only Qwen.
-}
-
-impl MessageContent {
-    /// Flatten to a single string. Array form concatenates all
-    /// `{type: "text"}` parts and drops anything else (images,
-    /// tool_use blocks, etc.) — fine for a text-only model.
-    fn as_text(&self) -> String {
-        match self {
-            Self::Text(s) => s.clone(),
-            Self::Parts(parts) => parts
-                .iter()
-                .filter(|p| p.kind == "text")
-                .filter_map(|p| p.text.as_deref())
-                .collect::<Vec<_>>()
-                .join(""),
+impl WireChatMessage {
+    fn into_canonical(self) -> CanonicalMessage {
+        let role = match self.role.as_str() {
+            "system" => Role::System,
+            "assistant" => Role::Assistant,
+            "tool" => Role::Tool,
+            _ => Role::User, // unknown roles fold to user; safer than panicking on input
+        };
+        // We accept assistant turns carrying tool_calls in arbitrary
+        // JSON shape (pi sends them when echoing a previous turn);
+        // we only flatten the *content* and pass tool_calls through
+        // as the model's own historical output. The render path
+        // re-serialises them into <tool_call> blocks.
+        let _ = self.tool_calls; // not threaded through canonical yet
+        let _ = self.name;
+        CanonicalMessage {
+            role,
+            content: self
+                .content
+                .as_ref()
+                .map(WireContent::as_text)
+                .unwrap_or_default(),
+            tool_calls: Vec::new(),
+            tool_call_id: self.tool_call_id,
+            name: None,
         }
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct ToolDef {
-    #[serde(rename = "type")]
-    kind: String,
-    function: ToolFunction,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct ToolFunction {
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    parameters: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -170,22 +160,6 @@ struct AssistantMessage {
     tool_calls: Option<Vec<ToolCall>>,
 }
 
-#[derive(Debug, Serialize)]
-struct ToolCall {
-    id: String,
-    #[serde(rename = "type")]
-    kind: &'static str,
-    function: ToolCallFunction,
-}
-
-#[derive(Debug, Serialize)]
-struct ToolCallFunction {
-    name: String,
-    /// Stringified JSON, per OpenAI spec — clients (pi included) parse
-    /// this themselves rather than getting a nested object.
-    arguments: String,
-}
-
 #[derive(Debug, Serialize, Default)]
 struct Usage {
     prompt_tokens: u32,
@@ -197,8 +171,10 @@ struct Usage {
 
 /// Render a Qwen3 ChatML prompt with optional tool definitions in the
 /// system block. Tool format follows Qwen's official template (the same
-/// format `src/bin/qwen-tool-test.rs` validated as working).
-fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
+/// format `src/bin/qwen-tool-test.rs` validated as working). Operates on
+/// canonical `ChatMessage` (flat `String` content); the agent loop will
+/// share this signature.
+fn render_qwen_prompt(messages: &[CanonicalMessage], tools: &[ToolDef]) -> String {
     let mut out = String::new();
 
     // Pull the user-provided system message (if any) and prepend the
@@ -206,8 +182,9 @@ fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
     // *inside* a system turn for the template to recognise them.
     let user_system = messages
         .iter()
-        .find(|m| m.role == "system")
-        .and_then(|m| m.content.as_ref().map(MessageContent::as_text))
+        .find(|m| m.role == Role::System)
+        .map(|m| m.content.clone())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "You are a helpful assistant.".to_string());
 
     out.push_str("<|im_start|>system\n");
@@ -215,8 +192,6 @@ fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
     if !tools.is_empty() {
         out.push_str("\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n");
         for t in tools {
-            // Serialise the whole tool object (type + function) — Qwen's
-            // template expects the OpenAI-shape JSON line-per-tool.
             if let Ok(s) = serde_json::to_string(t) {
                 out.push_str(&s);
                 out.push('\n');
@@ -227,53 +202,31 @@ fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
     out.push_str("<|im_end|>\n");
 
     for m in messages {
-        match m.role.as_str() {
-            "system" => continue, // already merged into the first system turn
-            "user" => {
+        match m.role {
+            Role::System => continue,
+            Role::User => {
                 out.push_str("<|im_start|>user\n");
-                if let Some(c) = &m.content {
-                    out.push_str(&c.as_text());
-                }
+                out.push_str(&m.content);
                 out.push_str("<|im_end|>\n");
             }
-            "assistant" => {
+            Role::Assistant => {
                 out.push_str("<|im_start|>assistant\n");
-                if let Some(c) = &m.content {
-                    out.push_str(&c.as_text());
-                }
-                // If the assistant turn contained tool_calls (continuing
-                // a multi-turn conversation), serialise them back as
-                // <tool_call> blocks so the model sees what it produced.
-                if let Some(calls) = &m.tool_calls {
-                    for c in calls {
-                        if let (Some(name), Some(args)) = (
-                            c.get("function")
-                                .and_then(|f| f.get("name"))
-                                .and_then(Value::as_str),
-                            c.get("function")
-                                .and_then(|f| f.get("arguments"))
-                                .and_then(Value::as_str),
-                        ) {
-                            out.push_str(&format!(
-                                "\n<tool_call>\n{{\"name\": \"{name}\", \"arguments\": {args}}}\n</tool_call>"
-                            ));
-                        }
-                    }
+                out.push_str(&m.content);
+                // Serialise any historical tool_calls back as <tool_call>
+                // blocks so the model sees its own previous output.
+                for c in &m.tool_calls {
+                    out.push_str(&format!(
+                        "\n<tool_call>\n{{\"name\": \"{}\", \"arguments\": {}}}\n</tool_call>",
+                        c.function.name, c.function.arguments
+                    ));
                 }
                 out.push_str("<|im_end|>\n");
             }
-            "tool" => {
-                // Tool results come back as a user-shaped turn in Qwen's
-                // template — they identify the call by name/id.
+            Role::Tool => {
                 out.push_str("<|im_start|>user\n<tool_response>\n");
-                if let Some(c) = &m.content {
-                    out.push_str(&c.as_text());
-                }
-                let _ = (&m.name, &m.tool_call_id); // already serialised in content per OpenAI convention
+                out.push_str(&m.content);
+                let _ = &m.tool_call_id; // identity is implicit in turn order
                 out.push_str("\n</tool_response><|im_end|>\n");
-            }
-            other => {
-                error!("unknown role: {other}");
             }
         }
     }
@@ -319,7 +272,7 @@ fn extract_tool_calls(raw: &str) -> (String, Vec<ToolCall>) {
             if !name.is_empty() {
                 calls.push(ToolCall {
                     id: format!("call_{}", uuid::Uuid::new_v4().simple()),
-                    kind: "function",
+                    kind: "function".to_string(),
                     function: ToolCallFunction {
                         name,
                         arguments: args,
@@ -416,10 +369,17 @@ struct SamplerOverrides {
 // ---------- HTTP handlers ----------
 
 async fn chat_completions(Json(req): Json<ChatCompletionRequest>) -> impl IntoResponse {
-    let prompt = render_qwen_prompt(&req.messages, &req.tools);
+    // Flatten the wire-form messages (which may have array-shaped content)
+    // into canonical String-content form before prompt rendering.
+    let messages: Vec<CanonicalMessage> = req
+        .messages
+        .into_iter()
+        .map(WireChatMessage::into_canonical)
+        .collect();
+    let prompt = render_qwen_prompt(&messages, &req.tools);
     info!(
         "chat.completions: {} messages, {} tools, {} prompt bytes",
-        req.messages.len(),
+        messages.len(),
         req.tools.len(),
         prompt.len()
     );
