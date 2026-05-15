@@ -34,11 +34,13 @@ mod tts;
 // by `slint-build` in `build.rs`).
 slint::include_modules!();
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::time::Instant;
 
 use log::{error, info};
 
@@ -180,10 +182,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_model: Rc<slint::VecModel<LogEntry>> = Rc::new(slint::VecModel::default());
     main_window.set_log_entries(slint::ModelRc::from(log_model.clone()));
 
-    // Track an "active state" string we mutate from event handlers.
-    // Stored in an RwLock so the Timer can read+write without locking
-    // the whole window.
     let session_running = Arc::new(AtomicBool::new(false));
+
+    // Tracks an in-flight pause(N): (start_instant, total_seconds).
+    // Set on ToolStart{name:"pause",...}; cleared when the agent
+    // dispatches ToolResult for pause (or when remaining ≤ 0). The
+    // Timer callback computes the remaining seconds each tick from
+    // this and pushes the integer count to Slint.
+    let pause_state: Rc<RefCell<Option<(Instant, f32)>>> = Rc::new(RefCell::new(None));
 
     // Periodic event-pump Timer (≈30 Hz). Drains AgentEvent +
     // ButtonEvent, mutates Slint properties.
@@ -198,6 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_running_for_timer = session_running.clone();
     let button_rx_for_timer = button_rx;
     let agent_rx_for_timer = agent_rx.clone();
+    let pause_state_for_timer = pause_state.clone();
 
     event_timer.start(
         slint::TimerMode::Repeated,
@@ -243,6 +250,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            // Tick the pause countdown if one is in flight.
+            if let Some((start, total)) = *pause_state_for_timer.borrow() {
+                let elapsed = start.elapsed().as_secs_f32();
+                let remaining = (total - elapsed).max(0.0);
+                window.set_pause_remaining(remaining.ceil() as i32);
+                if remaining <= 0.0 {
+                    // Don't clear active_tool here — wait for the agent's
+                    // ToolResult to fire so we stay in sync with the
+                    // actual end of the sleep().
+                    *pause_state_for_timer.borrow_mut() = None;
+                }
+            }
+
             // Drain AgentEvents and update Slint props.
             let Ok(rx_guard) = agent_rx_for_timer.try_lock() else {
                 return;
@@ -277,9 +297,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "pause" => {
                                 let secs =
                                     args.get("seconds").and_then(|v| v.as_f64()).unwrap_or(0.0)
-                                        as i32;
+                                        as f32;
                                 window.set_active_tool("pausing".into());
-                                window.set_pause_remaining(secs);
+                                window.set_pause_remaining(secs.ceil() as i32);
+                                *pause_state_for_timer.borrow_mut() = Some((Instant::now(), secs));
                             }
                             "ring_bell" => {
                                 window.set_active_tool("ringing".into());
