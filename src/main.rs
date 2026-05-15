@@ -9,6 +9,7 @@
 //! Send SIGTERM or SIGINT to quit cleanly (no physical keyboard needed).
 //! Hardware buttons: BACK=quit, ENTER=start, UP/DOWN=scroll.
 
+mod agent_loop;
 mod config;
 mod gpio;
 mod llm;

@@ -20,6 +20,26 @@ Performance numbers live in [11_BENCHMARKS.md](11_BENCHMARKS.md).
   load). See `11_BENCHMARKS.md` LLM section.
 - [ ] Migrate TTS off espeak-ng baseline to `piper-rs`, then
   `piper-rknn-rs` for NPU acceleration. Track in §3 below.
+- [ ] **Redesign the ratatui surface for a calm, retro-meditation
+  aesthetic.** Larger font (current 32×16 Terminus stays, but the
+  meditation pane needs body text in a much larger size — at least
+  2× current), **black foreground on pale/cream background** (we
+  already have a `gruvbox_light` theme but the contrast and font
+  weight aren't right for meditation). Survey
+  [awesome-ratatui](https://github.com/ratatui/awesome-ratatui) for
+  retro-aesthetic inspirations — `oxker`, `tachyonfx`, `gitui`-style
+  layouts, and the boxed/centered presentations in
+  `awesome-ratatui#applications` are good starting points. The goal
+  is a surface that looks like it could be from a 1990s meditation
+  appliance, not a developer's terminal.
+- [ ] **Implement dual-voice register** (system espeak-ng vs agent
+  paroli) per
+  [docs/15_INTERACTION.md § Voice registers](15_INTERACTION.md#voice-registers-system-vs-agent).
+  `TtsCommand` needs to split into `Speak` (agent, paroli) and
+  `Announce` (system, espeak-ng forced regardless of `tts.engine`).
+  System voice is used for boot status ("ready"), brief cues, and
+  error announcements; agent voice is everything Jhana herself says.
+  CA-correctness: unambiguous speaker attribution.
 
 **POC success criterion (Phase 1):** Text prompt -> LLM streams meditation
 text -> ratatui displays sentences with pause markers -> Piper generates WAV
