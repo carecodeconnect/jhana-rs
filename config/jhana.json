@@ -41,7 +41,7 @@
     "record_seconds": 5
   },
   "tts": {
-    "engine": "moonshine",
+    "engine": "paroli",
     "espeak_amplitude": 100,
     "espeak_rate": 145,
     "paroli": {

@@ -159,6 +159,36 @@ with a converted `.rknn` decoder model.
 
 ---
 
+### Decision update: Moonshine Voice evaluated, reverted to paroli (2026-05-15)
+
+Tested [Moonshine Voice](https://github.com/usefulsensors/moonshine) (Useful
+Sensors, Feb 2026 release) as an alternative TTS engine alongside the
+existing paroli + RKNN path. Selected `kokoro_am_michael` for a natural male
+voice; integrated as a persistent Python worker (`scripts/moonshine_tts_worker.py`)
+spawned by `src/tts.rs` with a JSON `{text, out}` request/`{ok}` reply
+protocol over stdin/stdout. Kept paroli, SenseVoice, espeak-ng all
+selectable via `config/jhana.json` (`tts.engine`).
+
+**Outcome: reverted to paroli + RKNN NPU.**
+
+| Engine | RTF | TTFT (typical sentence) | Voice quality | Notes |
+|--------|-----|-------------------------|---------------|-------|
+| paroli (RKNN decoder) | **0.29** | ~0.3 s | Good female (ljspeech) | NPU-accelerated, current default |
+| Moonshine (CPU, kokoro_am_michael) | ~1.5 | ~2.5 s | Excellent male | No NPU path; ONNX Runtime CPU only |
+
+Speed dominated the decision — paroli's NPU path is ~5× faster TTFT, which
+matters for the "Speak now" cue (cached) and meditation pacing alike.
+Moonshine's voice quality is higher and the male voice is a better fit
+for the intended meditation persona, but at current Rock 5A CPU speeds
+the TTFT regression was perceptible compared to paroli NPU.
+
+Moonshine support is kept in the codebase and config; flip `tts.engine`
+to `"moonshine"` to re-enable. Future direction: investigate whether
+Kokoro ONNX decoder can be routed through RKNN (similar trick to
+paroli's Piper-decoder conversion) for an NPU-backed male voice.
+
+---
+
 ### Decision: sherpa-onnx (2026-05-07)
 
 **Engine: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** (C++ FFI via Rust bindings)

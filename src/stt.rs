@@ -99,67 +99,6 @@ pub static STT_READY: AtomicBool = AtomicBool::new(false);
 /// Pre-rendered "Speak now." prompt played at the start of each listen.
 const CUE_WAV: &str = "/tmp/jhana_speak_now.wav";
 
-/// Render the "Speak now." cue once at thread startup using the
-/// configured TTS engine. If paroli is configured we use it (matches
-/// the welcome / meditation voice). Falls back to espeak-ng on any
-/// failure so the cue always exists by the time the user presses ENTER.
-fn render_cue() {
-    let phrase = "Speak now.";
-    let tts = &crate::config::get().tts;
-
-    if tts.engine == "paroli"
-        && let Some(p) = &tts.paroli
-    {
-        let result = Command::new(&p.bin)
-            .env("LD_LIBRARY_PATH", &p.ld_library_path)
-            .args([
-                "--encoder",
-                &p.encoder,
-                "--decoder",
-                &p.decoder,
-                "-c",
-                &p.config,
-                "--espeak_data",
-                &p.espeak_data,
-                "--length_scale",
-                &p.length_scale.to_string(),
-                "--output_file",
-                CUE_WAV,
-                "--quiet",
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                if let Some(stdin) = child.stdin.as_mut() {
-                    let _ = stdin.write_all(phrase.as_bytes());
-                    let _ = stdin.write_all(b"\n");
-                }
-                child.wait_with_output()
-            });
-        if matches!(&result, Ok(out) if out.status.success())
-            && std::fs::metadata(CUE_WAV).map(|m| m.len() > 44).unwrap_or(false)
-        {
-            info!("STT cue rendered via paroli at {CUE_WAV}");
-            return;
-        }
-        error!("STT cue paroli render failed; falling back to espeak-ng");
-    }
-
-    let ok = Command::new("espeak-ng")
-        .args(["-a", "100", "-s", "145", "-w", CUE_WAV, phrase])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if ok {
-        info!("STT cue rendered via espeak-ng at {CUE_WAV}");
-    } else {
-        error!("STT cue render failed; pressing ENTER will give no audible cue");
-    }
-}
-
 pub fn start(
     result_tx: Sender<SttResult>,
     tts_tx: Sender<crate::tts::TtsCommand>,
@@ -212,9 +151,19 @@ fn stt_loop(
     );
     STT_READY.store(true, Ordering::Release);
 
-    // The "Speak now" cue is now spoken through the TTS thread (so it
-    // serialises with anything else the TTS is playing — no overlap).
-    // No pre-rendered cache file needed any more.
+    // Pre-render the "Speak now" cue once via the TTS thread (so the
+    // configured engine — paroli, moonshine, espeak — is honoured)
+    // and cache it at CUE_WAV. Each press just paplays the cache via
+    // the TTS thread, no per-press synth.
+    {
+        let (ack_tx, ack_rx) = std::sync::mpsc::channel::<()>();
+        let _ = tts_tx.send(crate::tts::TtsCommand::Render {
+            text: "Speak now.".to_string(),
+            out_path: CUE_WAV.to_string(),
+            ack: ack_tx,
+        });
+        let _ = ack_rx.recv_timeout(std::time::Duration::from_secs(120));
+    }
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
@@ -239,12 +188,15 @@ fn listen_and_transcribe(
     result_tx: &Sender<SttResult>,
     tts_tx: &Sender<crate::tts::TtsCommand>,
 ) {
-    // "Speak now" cue goes through the TTS thread so it serialises
-    // with anything else the TTS is mid-speaking (no PA mixing the
-    // cue on top of an in-flight sentence). Wait for the synchronous
-    // ack before opening arecord.
+    // Play the pre-rendered "Speak now" cue via the TTS thread (which
+    // serialises with any in-flight TTS sentence — no overlap). We
+    // don't re-synth here; the cue WAV was rendered once at thread
+    // startup and cached at CUE_WAV.
     let (ack_tx, ack_rx) = std::sync::mpsc::channel::<()>();
-    let _ = tts_tx.send(crate::tts::TtsCommand::SpeakAndAck("Speak now.".to_string(), ack_tx));
+    let _ = tts_tx.send(crate::tts::TtsCommand::PlayWavAndAck(
+        CUE_WAV.to_string(),
+        ack_tx,
+    ));
     let _ = ack_rx.recv_timeout(std::time::Duration::from_secs(15));
 
     // Small settle delay: paplay returns when its userspace buffer is

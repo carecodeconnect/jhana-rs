@@ -49,6 +49,13 @@ pub enum TtsCommand {
     /// the cue has actually finished, instead of letting paplay
     /// overlap with whatever the TTS thread is playing.
     SpeakAndAck(String, Sender<()>),
+    /// Synthesise `text` to a WAV at `out_path` (no playback) and ack.
+    /// Used by STT to pre-render the "Speak now" cue once and reuse
+    /// the cached WAV — avoids re-synthesising on every press.
+    Render { text: String, out_path: String, ack: Sender<()> },
+    /// Play a pre-rendered WAV through PA and ack. Serialised through
+    /// the TTS thread (so it doesn't overlap an in-flight sentence).
+    PlayWavAndAck(String, Sender<()>),
     /// Silent pause for this many seconds. Honoured by the TTS thread
     /// (it sleeps) so the user actually experiences the pause instead
     /// of hearing "fifteen seconds" spoken aloud.
@@ -124,6 +131,14 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
                 speak_sentence(&sentence);
                 let _ = ack.send(());
             }
+            TtsCommand::Render { text, out_path, ack } => {
+                render_phrase(&text, &out_path);
+                let _ = ack.send(());
+            }
+            TtsCommand::PlayWavAndAck(path, ack) => {
+                play_wav(&path);
+                let _ = ack.send(());
+            }
             TtsCommand::Pause(seconds) => {
                 let clamped = seconds.clamp(0.0, 120.0);
                 info!("TTS: pausing {clamped:.1}s");
@@ -140,6 +155,31 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
                 while rx.try_recv().is_ok() {}
             }
         }
+    }
+}
+
+/// Synthesise `phrase` to `out_path` only — no playback. Used for
+/// pre-rendering cue audio that the STT thread will paplay later.
+/// Tries the configured engine first; falls back to espeak-ng.
+fn render_phrase(phrase: &str, out_path: &str) {
+    let cfg = &config::get().tts;
+    let saved = WAV_PATH; // speak_sentence's hardcoded scratch path
+    // The existing synth_with_* helpers all write to WAV_PATH; we
+    // synthesise there then copy to the requested path. Simpler than
+    // threading a path arg through every backend.
+    let ok = match cfg.engine.as_str() {
+        "paroli" if cfg.paroli.is_some() => synth_with_paroli(phrase),
+        "moonshine" if cfg.moonshine.is_some() => synth_with_moonshine(phrase),
+        _ => false,
+    } || synth_with_espeak(phrase);
+
+    if ok {
+        match std::fs::copy(saved, out_path) {
+            Ok(_) => info!("rendered '{}' to {}", &phrase[..phrase.len().min(40)], out_path),
+            Err(e) => error!("failed to cache cue WAV: {e}"),
+        }
+    } else {
+        error!("Render failed for '{}'", &phrase[..phrase.len().min(40)]);
     }
 }
 
