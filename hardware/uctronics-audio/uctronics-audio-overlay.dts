@@ -1,14 +1,16 @@
 // Device tree overlay for Uctronics AI in a Box audio codec.
 //
-// Hardware: custom Useful Sensors "uctronics-codec" — a class-D speaker amp
-// (sdmode + 3-bit gain GPIOs) and a MEMS I2S microphone wrapped into one
-// ALSA sound card via the rockchip,multicodecs-card framework.
+// Hardware: custom Useful Sensors "uctronics-codec" — a class-D speaker
+// amp (sdmode + 3-bit gain GPIOs) and a MEMS I2S microphone wrapped
+// into one ALSA sound card via the rockchip,multicodecs-card framework.
 //
 // Pairs with the out-of-tree snd-soc-uctronics-codec.ko module
 // (see Makefile + snd-soc-uctronics-codec.c in this directory).
 //
 // Target kernel: Armbian 6.1.115-vendor-rk35xx on Rock 5A.
-// See docs/09_AUDIO.md for hardware analysis and reverse-engineering notes.
+// See docs/09_AUDIO.md for hardware analysis and reverse-engineering
+// notes — in particular the warning about NOT setting clk-trcm or
+// /delete-property/ trcm-sync-tx-only here; those broke boot twice.
 
 /dts-v1/;
 /plugin/;
@@ -21,10 +23,20 @@
 		__overlay__ {
 			audio_codec_0: audio-codec-0 {
 				compatible = "uctronics,uctronics-codec";
-				sdmode-gpios    = <&gpio3 13 0>; /* GPIO3_B5 — amp enable */
-				gainsel_1-gpios = <&gpio3  3 0>; /* GPIO3_A3 — gain MSB */
-				gainsel_2-gpios = <&gpio3  5 0>; /* GPIO3_A5 — gain mid */
-				gainsel_3-gpios = <&gpio3  2 0>; /* GPIO3_A2 — gain LSB */
+
+				// Speaker amp enable + 3-bit gain selector GPIOs.
+				// Without these the codec driver leaves the gain
+				// pins floating and DAC Playback Volume is a no-op.
+				sdmode-gpios    = <&gpio3 13 0>; /* GPIO3_B5 */
+				gainsel_1-gpios = <&gpio3  3 0>; /* GPIO3_A3 — MSB */
+				gainsel_2-gpios = <&gpio3  5 0>; /* GPIO3_A5 — mid */
+				gainsel_3-gpios = <&gpio3  2 0>; /* GPIO3_A2 — LSB */
+
+				// Mid-range default: vol 2 ≈ +12 dB. Adjust at
+				// runtime with `amixer -c 1 cset numid=12 N`
+				// (0–4; 4 is the loudest = ~+18 dB).
+				default-volume = <2>;
+
 				#sound-dai-cells = <0>;
 				status = "okay";
 			};
@@ -41,33 +53,26 @@
 		};
 	};
 
-	// Enable I2S1_8CH (disabled by default in Armbian) and fix its clock mode.
+	// Enable I2S1_8CH (disabled by default in Armbian). We deliberately
+	// keep this fragment minimal — DO NOT add rockchip,clk-trcm here or
+	// /delete-property/ rockchip,trcm-sync-tx-only. Two earlier attempts
+	// to do so hung systemd at boot (no networking, no getty) and forced
+	// SD-card recovery. The mic works fine without the clock-mode change
+	// once we capture at S32_LE 48 kHz — see docs/09_AUDIO.md.
 	//
-	// Armbian's base DT sets rockchip,trcm-sync-tx-only — in that mode the
-	// shared TRCM clock only runs while TX (playback) is active, so a
-	// standalone arecord receives no bit-clock on SDI and the mic returns
-	// asymmetric DC-offset junk.
-	//
-	// The Useful Sensors baseline DT instead uses rockchip,clk-trcm = <1>
-	// (both directions clocked together). We replicate that here.
+	// pinctrl-0 must be set explicitly: the originally-deployed working
+	// overlay listed all four groups (LRCK, SCLK, SDI0 for mic, SDO0 for
+	// speaker) and dropping them from a later iteration hung boot. See
+	// docs/TROUBLESHOOTING.md.
 	fragment@1 {
 		target = <&i2s1_8ch>;
 		__overlay__ {
 			status = "okay";
 			rockchip,playback-channels = <2>;
 			rockchip,capture-channels = <2>;
-
-			// rockchip,clk-trcm = <1> forces the TRCM-shared clock to be
-			// driven both directions. Without this, Armbian's base DT
-			// (which sets rockchip,trcm-sync-tx-only) only clocks RX while
-			// TX is active, so standalone arecord captures garbage.
-			//
-			// We do NOT /delete-property/ rockchip,trcm-sync-tx-only here:
-			// an earlier overlay variant that did so prevented boot on this
-			// board (u-boot fdt-apply or early kernel rejected it). The
-			// rk3588 i2s-tdm driver checks rockchip,clk-trcm first, so adding
-			// it should win even if the boolean property is still present.
-			rockchip,clk-trcm = <1>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2s1m0_lrck &i2s1m0_sclk
+				     &i2s1m0_sdi0 &i2s1m0_sdo0>;
 		};
 	};
 };

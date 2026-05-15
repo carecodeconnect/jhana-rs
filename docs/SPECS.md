@@ -11,6 +11,89 @@ connection.
 
 ---
 
+## Aim (long-term vision, 2026-05-15)
+
+jhana-rs is a self-contained Rust backend on the Rock 5A that delivers
+**guided, personalised Jhana meditations** with no cloud dependency:
+
+- **VAD / STT / TTS** in pure Rust on CPU (sensevoice-rs for STT today;
+  webrtc-vad or Silero on the input side; Piper for TTS now, NeuTTS Air
+  or `piper-rknn-rs` next).
+- **LLM inference on the RK3588 NPU** (currently Llama 3.2 3B via
+  rkllm-rs; soon a meditation-tuned model in the same `.rkllm` format).
+  The NPU is dedicated to the LLM so the A76 cores stay free for the
+  audio pipeline.
+- The product is a **cyberbox** — a single-purpose, offline,
+  battery/AC-powered physical object, not an app on a phone.
+
+The current TUI (Ratatui) renders sentences and pause markers in a
+fixed loop. The next architectural shift is to swap Ratatui for an
+**agent harness** — likely the local `/mnt/projects/pi` runtime — so
+that the meditation flow is driven by a tool-using language model
+rather than a hand-coded state machine. The harness lets the model:
+
+- **call skills / function tools** on the device (start TTS, ring a
+  bell, wait N seconds, transition phase, ask a clarifying question)
+- **read meditation literature** from a local repository archive of
+  jhana templates (suttas, modern teachers, jhana-mistral training
+  data) via a retrieval/tool call
+- **compose a personalised session** by selecting and adapting a
+  template to the user's stated goal, experience level, time budget,
+  and post-session feedback — instead of running a fixed script
+
+The harness path is currently aspirational; Ratatui stays in place
+until the agent + skills runtime is built. None of the changes break
+the offline-by-default rule: all literature, templates, and tools
+must live on the device's storage.
+
+### Candidate agent harnesses
+
+The choice of harness drives whether we can stay in a single Rust
+binary or have to add a Python / Node sidecar on the device. Selection
+criteria, in priority order: **(a) runs fully offline on aarch64 with
+no cloud calls**, (b) speaks to a local OpenAI-compatible endpoint
+(or directly to rkllm-rs), (c) embeds as a library rather than a
+separate service, (d) tool/function-call routing for skills,
+(e) memory / RAG over the meditation-template archive, (f) low
+overhead — the meditation experience can't tolerate seconds of
+agent-side latency on top of LLM tok/s.
+
+| Harness                                                            | Language | Embed model      | Tool calls         | RAG/memory        | aarch64-ready | Fit for jhana-rs                                                                 |
+|--------------------------------------------------------------------|----------|------------------|--------------------|-------------------|---------------|----------------------------------------------------------------------------------|
+| **`/mnt/projects/pi`** (local internal harness)                    | TBD      | unknown          | yes (skills)       | TBD               | likely        | Top contender if it stays small and Rust-callable; primary integration target.   |
+| **Rig** — <https://www.rig.rs/>                                    | Rust     | library          | yes                | vector stores     | yes           | Strong fit: pure-Rust crate, OpenAI-compatible, can target any local server.     |
+| **Flue** — <https://github.com/withastro/flue>                     | JS/TS    | Node runtime     | yes                | varies            | yes (Node)    | Adds Node to the device; OK for a sidecar but not single-binary.                 |
+| **LangChain** / **LangGraph** (langchain-ai)                       | Python   | library/runtime  | mature             | mature            | yes           | Powerful but pulls Python + heavy deps; only worth it if other Python is on-box. |
+| **swiftide** — <https://github.com/bosun-ai/swiftide>              | Rust     | library          | yes                | vector + indexers | yes           | Tilted toward RAG/indexing pipelines; useful for the template archive.           |
+| **Direct rkllm-rs + custom tool router** (status quo + skills)     | Rust     | library          | hand-rolled        | hand-rolled       | yes           | Lowest dependency surface; most code to write ourselves.                         |
+
+Notes:
+
+- The **status-quo path** is to keep `src/llm.rs` (rkllm-rs) and add a
+  small Rust skills router (a function-calling layer + a template
+  retriever over a local jhana corpus). This is the simplest delta
+  from where jhana-rs is today.
+- **Rig** is the most natural step up — it's a Rust crate, hits any
+  OpenAI-compatible endpoint (we can stand up `rkllama` or wrap
+  rkllm-rs behind a thin local HTTP shim), and brings a tool-call
+  abstraction without giving up the single-binary deployment.
+- **Flue** and **LangGraph** are powerful, but bring an additional
+  runtime (Node or Python) to the cyberbox. Acceptable as a sidecar
+  if `/mnt/projects/pi` itself ends up being JS/TS based and we
+  already need that runtime on device.
+- **swiftide** is interesting specifically for indexing the meditation
+  literature archive (Pali Canon excerpts, modern Jhana teachers,
+  jhana-mistral training data) into a local vector store the agent
+  can retrieve from — we may use it under whichever harness we pick.
+
+Decision is deferred until the `/mnt/projects/pi` interface is more
+concrete; until then jhana-rs continues to be implemented as a
+hand-rolled Rust pipeline.
+
+
+
+---
+
 ## 1. Target Hardware
 
 | Spec | Value |
