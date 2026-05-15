@@ -336,9 +336,9 @@ pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),     // header
-            Constraint::Min(1),        // body — split below into meditation + console
-            Constraint::Length(4),     // footer
+            Constraint::Length(3), // header
+            Constraint::Min(1),    // body — split below into meditation + console
+            Constraint::Length(4), // footer
         ])
         .split(frame.area());
 
@@ -347,10 +347,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     // text — fixes the line-collision the user reported.
     let body_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(70),
-            Constraint::Percentage(30),
-        ])
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
         .split(chunks[1]);
 
     // Fill background

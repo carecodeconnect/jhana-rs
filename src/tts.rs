@@ -52,7 +52,11 @@ pub enum TtsCommand {
     /// Synthesise `text` to a WAV at `out_path` (no playback) and ack.
     /// Used by STT to pre-render the "Speak now" cue once and reuse
     /// the cached WAV — avoids re-synthesising on every press.
-    Render { text: String, out_path: String, ack: Sender<()> },
+    Render {
+        text: String,
+        out_path: String,
+        ack: Sender<()>,
+    },
     /// Play a pre-rendered WAV through PA and ack. Serialised through
     /// the TTS thread (so it doesn't overlap an in-flight sentence).
     PlayWavAndAck(String, Sender<()>),
@@ -131,7 +135,11 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
                 speak_sentence(&sentence);
                 let _ = ack.send(());
             }
-            TtsCommand::Render { text, out_path, ack } => {
+            TtsCommand::Render {
+                text,
+                out_path,
+                ack,
+            } => {
                 render_phrase(&text, &out_path);
                 let _ = ack.send(());
             }
@@ -142,9 +150,7 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
             TtsCommand::Pause(seconds) => {
                 let clamped = seconds.clamp(0.0, 120.0);
                 info!("TTS: pausing {clamped:.1}s");
-                std::thread::sleep(std::time::Duration::from_millis(
-                    (clamped * 1000.0) as u64,
-                ));
+                std::thread::sleep(std::time::Duration::from_millis((clamped * 1000.0) as u64));
             }
             TtsCommand::Bell => {
                 info!("TTS: ring bell");
@@ -175,7 +181,11 @@ fn render_phrase(phrase: &str, out_path: &str) {
 
     if ok {
         match std::fs::copy(saved, out_path) {
-            Ok(_) => info!("rendered '{}' to {}", &phrase[..phrase.len().min(40)], out_path),
+            Ok(_) => info!(
+                "rendered '{}' to {}",
+                &phrase[..phrase.len().min(40)],
+                out_path
+            ),
             Err(e) => error!("failed to cache cue WAV: {e}"),
         }
     } else {
@@ -307,7 +317,11 @@ fn spawn_moonshine_worker() {
         }
     }
 
-    *MOONSHINE_WORKER.lock().unwrap() = Some(MoonshineWorker { child, stdin, stdout });
+    *MOONSHINE_WORKER.lock().unwrap() = Some(MoonshineWorker {
+        child,
+        stdin,
+        stdout,
+    });
 }
 
 /// Synthesise via the persistent Moonshine worker. Writes the WAV at WAV_PATH.
@@ -340,7 +354,10 @@ fn synth_with_moonshine(sentence: &str) -> bool {
     match serde_json::from_str::<serde_json::Value>(resp.trim()) {
         Ok(v) if v.get("ok").and_then(|b| b.as_bool()) == Some(true) => true,
         Ok(v) => {
-            error!("moonshine worker error: {}", v.get("error").map_or("?", |x| x.as_str().unwrap_or("?")));
+            error!(
+                "moonshine worker error: {}",
+                v.get("error").map_or("?", |x| x.as_str().unwrap_or("?"))
+            );
             false
         }
         Err(e) => {
@@ -432,17 +449,29 @@ fn render_bell() {
             "-hide_banner",
             "-loglevel",
             "error",
-            "-f", "lavfi", "-i", "sine=frequency=523:duration=4",
-            "-f", "lavfi", "-i", "sine=frequency=1046:duration=4",
-            "-f", "lavfi", "-i", "sine=frequency=784:duration=4",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=523:duration=4",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1046:duration=4",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=784:duration=4",
             "-filter_complex",
             "[0:a]volume=0.85,afade=t=out:st=0.05:d=3.9[a0];\
              [1:a]volume=0.35,afade=t=out:st=0.02:d=1.5[a1];\
              [2:a]volume=0.25,afade=t=out:st=0.03:d=2.0[a2];\
              [a0][a1][a2]amix=inputs=3:duration=longest:normalize=0",
-            "-ar", "48000",
-            "-ac", "1",
-            "-sample_fmt", "s16",
+            "-ar",
+            "48000",
+            "-ac",
+            "1",
+            "-sample_fmt",
+            "s16",
             BELL_WAV,
         ])
         .status();

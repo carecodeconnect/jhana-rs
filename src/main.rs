@@ -129,8 +129,7 @@ fn main() -> io::Result<()> {
                 }
                 info!("LLM ready — welcome");
                 for line in &config::get().ui.welcome_lines {
-                    let _ = tts_tx_for_welcome
-                        .send(tts::TtsCommand::Speak(line.clone()));
+                    let _ = tts_tx_for_welcome.send(tts::TtsCommand::Speak(line.clone()));
                 }
             })
             .expect("failed to spawn welcome thread");

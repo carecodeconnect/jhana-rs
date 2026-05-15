@@ -114,7 +114,11 @@ fn main() -> Result<(), String> {
 
     let infer_start = std::time::Instant::now();
     handle
-        .run(RKLLMInput::prompt(&prompt), Some(RKLLMInferParam::default()), collector)
+        .run(
+            RKLLMInput::prompt(&prompt),
+            Some(RKLLMInferParam::default()),
+            collector,
+        )
         .map_err(|e| format!("inference failed: {e}"))?;
     let infer_secs = infer_start.elapsed().as_secs_f32();
 
@@ -134,10 +138,15 @@ fn main() -> Result<(), String> {
 
     let tool_calls = extract_tool_calls(&raw);
     if tool_calls.is_empty() {
-        println!("\n[VERDICT] NO <tool_call> blocks found. Qwen3-1.7B did not emit a structured tool call.");
+        println!(
+            "\n[VERDICT] NO <tool_call> blocks found. Qwen3-1.7B did not emit a structured tool call."
+        );
         std::process::exit(2);
     }
-    println!("\n[VERDICT] Found {} <tool_call> block(s):", tool_calls.len());
+    println!(
+        "\n[VERDICT] Found {} <tool_call> block(s):",
+        tool_calls.len()
+    );
     let mut ok = 0;
     for (i, tc) in tool_calls.iter().enumerate() {
         match tc {

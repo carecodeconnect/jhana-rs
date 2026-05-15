@@ -165,7 +165,8 @@ impl Default for UiConfig {
 /// error instead of a silent fallback.
 pub fn get() -> &'static Config {
     CONFIG.get_or_init(|| {
-        let path = std::env::var("JHANA_CONFIG").unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
+        let path =
+            std::env::var("JHANA_CONFIG").unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
         let path_buf = PathBuf::from(&path);
         let raw = fs::read_to_string(&path_buf).unwrap_or_else(|e| {
             panic!("failed to read {path_buf:?}: {e} (set JHANA_CONFIG or copy config/jhana.json)")
