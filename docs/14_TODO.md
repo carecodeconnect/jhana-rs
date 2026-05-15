@@ -2,6 +2,24 @@
 
 Tracks all steps from initial hardware setup through Phase 1 POC completion.
 See [10_SPECS.md](10_SPECS.md) for full technical specifications.
+Performance numbers live in [11_BENCHMARKS.md](11_BENCHMARKS.md).
+
+## Cross-cutting follow-ups
+
+- [ ] **Optimise Rust/NPU inference using benchmarking.** With the
+  3 B Llama working at 4.5 tok/s (see [11_BENCHMARKS.md](11_BENCHMARKS.md)),
+  the next round of work is squeezing more throughput out of the
+  same hardware: try alternative quantisations (w4a16 if RKLLM
+  supports it), reduce `max_context_limit` from 4096 to whatever
+  meditation prompts actually use, profile prefill-vs-decode time,
+  consider mistral.rs `npu` backend if/when it lands. Drive these
+  decisions from measured numbers in `11_BENCHMARKS.md`, not vibes.
+- [ ] Bump the LLM model-load timeout in `src/llm.rs` to ≥ 90 s —
+  the 3 B Llama takes ~74 s cold on the NPU (under any LLM timeout
+  shorter than this, the TUI reports a false negative on the model
+  load). See `11_BENCHMARKS.md` LLM section.
+- [ ] Migrate TTS off espeak-ng baseline to `piper-rs`, then
+  `piper-rknn-rs` for NPU acceleration. Track in §3 below.
 
 **POC success criterion (Phase 1):** Text prompt -> LLM streams meditation
 text -> ratatui displays sentences with pause markers -> Piper generates WAV
