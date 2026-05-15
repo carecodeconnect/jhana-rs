@@ -5,6 +5,26 @@ All commands read credentials from `config.json` via `scripts/rock-*.sh`.
 
 ---
 
+## Auto-start the TUI at boot
+
+The systemd unit at `hardware/jhana-rs.service` (deployed to
+`/etc/systemd/system/jhana-rs.service` on the Rock) launches the TUI
+on `tty1` at boot. It conflicts with `getty@tty1.service` so no login
+prompt fights for the screen.
+
+Enable / disable:
+
+```bash
+scripts/rock-ssh.sh "sudo systemctl enable jhana-rs.service"
+scripts/rock-ssh.sh "sudo systemctl disable jhana-rs.service"
+scripts/rock-ssh.sh "sudo systemctl status jhana-rs.service"
+scripts/rock-ssh.sh "sudo journalctl -u jhana-rs.service -b --no-pager"
+```
+
+Logs from the binary itself land in `/home/ubuntu/jhana-rs/jhana-rs.log`.
+
+---
+
 ## SSH into the Rock
 
 ```bash

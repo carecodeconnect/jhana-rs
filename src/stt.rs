@@ -159,11 +159,22 @@ fn listen_and_transcribe(svs: &SenseVoiceSmall, result_tx: &Sender<SttResult>) {
     // Signal that we're recording
     let _ = result_tx.send(SttResult::Recording);
 
-    // Audible "Speak now" cue — without this the user has to guess
-    // exactly when the 5-second mic window opens.
-    let _ = Command::new("espeak-ng")
-        .args(["-a", "100", "-s", "145", "Speak now."])
-        .status();
+    // Audible "Speak now" cue. espeak-ng's default ALSA device is the
+    // system default (often the wrong card on a multi-codec board, and
+    // we've seen it block for ~18 s waiting on a wrong-card stream),
+    // so synthesise to a WAV first and play it explicitly via aplay
+    // on the Uctronics speaker (plughw:1,0).
+    const CUE_WAV: &str = "/tmp/jhana_stt_cue.wav";
+    if Command::new("espeak-ng")
+        .args(["-a", "100", "-s", "145", "-w", CUE_WAV, "Speak now."])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        let _ = Command::new("aplay")
+            .args(["-q", "-D", "plughw:1,0", CUE_WAV])
+            .status();
+    }
 
     // Record from mic via arecord
     let wav_path = PathBuf::from(RECORD_PATH);

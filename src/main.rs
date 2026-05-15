@@ -96,28 +96,35 @@ fn main() -> io::Result<()> {
     let mut app = App::new();
     app.push_sentence("Loading models...".to_string());
 
-    // Welcome the user once both models have finished loading. Speaking
-    // while loads are still in flight means the user can press ENTER
-    // and then sit staring at a frozen screen for tens of seconds.
-    // Spawn a tiny thread that waits for the two ready flags, then
-    // queues the welcome lines to the TTS thread (which the main loop
-    // sees as it polls). We don't gate the TUI render on this — the
-    // screen still updates.
+    // Two-stage spoken status so the user gets an audible signal
+    // long before the slow LLM cold-load (~2 min) finishes.
+    //
+    //   1. As soon as SenseVoice finishes (~22 s), say "Loading
+    //      models, please wait" so the user knows the device is
+    //      alive and hasn't crashed.
+    //   2. Once both STT and LLM are ready (~2 min total cold),
+    //      say the full welcome ("Welcome to jhana-rs. Press the
+    //      enter button..."). The user can press ENTER from then on.
     {
         use std::sync::atomic::Ordering;
         let tts_tx_for_welcome = tts_tx.clone();
         std::thread::Builder::new()
             .name("welcome".into())
             .spawn(move || {
-                loop {
-                    let stt_ready = stt::STT_READY.load(Ordering::Acquire);
-                    let llm_ready = llm::LLM_READY.load(Ordering::Acquire);
-                    if stt_ready && llm_ready {
-                        break;
-                    }
+                // Stage 1: wait for STT only.
+                while !stt::STT_READY.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                info!("models loaded — playing welcome");
+                info!("STT ready — playing 'loading' announcement");
+                let _ = tts_tx_for_welcome.send(tts::TtsCommand::Speak(
+                    "Loading the meditation model. Please wait.".to_string(),
+                ));
+
+                // Stage 2: wait for LLM, then full welcome.
+                while !llm::LLM_READY.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                info!("LLM ready — playing welcome");
                 for line in WELCOME_LINES {
                     let _ = tts_tx_for_welcome
                         .send(tts::TtsCommand::Speak((*line).to_string()));
@@ -169,6 +176,13 @@ fn run_loop(
     stt_rx: &mpsc::Receiver<SttResult>,
 ) -> io::Result<()> {
     loop {
+        // Transition out of the Loading screen once both models report ready.
+        // Cheap atomic loads each tick; the App method is a no-op after the
+        // first call.
+        if stt::STT_READY.load(Ordering::Acquire) && llm::LLM_READY.load(Ordering::Acquire) {
+            app.finish_loading();
+        }
+
         terminal.draw(|frame| render(frame, app))?;
 
         // Check signal flag
@@ -293,6 +307,9 @@ fn handle_start(app: &mut App, stt_tx: &mpsc::Sender<stt::SttCommand>) {
         }
         AppState::Generating | AppState::Paused => {
             info!("start pressed during generation — ignored");
+        }
+        AppState::Loading => {
+            info!("start pressed during model load — ignored");
         }
     }
 }

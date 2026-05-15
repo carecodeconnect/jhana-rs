@@ -31,6 +31,8 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
+use crate::stt;
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -78,6 +80,22 @@ impl Theme {
         }
     }
 
+    /// Gruvbox-light theme — calm cream background with the gruvbox
+    /// orange/olive/purple palette. Easy on the eyes for long
+    /// meditation sessions and reads cleanly on the small DSI panel.
+    /// Colors taken from Pawel Wieczorek's canonical gruvbox palette.
+    pub const fn gruvbox_light() -> Self {
+        Self {
+            bg: Color::Rgb(0xfb, 0xf1, 0xc7),         // bg0  — soft cream
+            accent: Color::Rgb(0xd6, 0x5d, 0x0e),     // orange — title, highlight
+            accent_dim: Color::Rgb(0xa8, 0x99, 0x84), // gray  — borders, secondary
+            title_dim: Color::Rgb(0xaf, 0x3a, 0x03),  // dark orange — subtitle
+            body: Color::Rgb(0x3c, 0x38, 0x36),       // fg1   — body text
+            pause: Color::Rgb(0x8f, 0x3f, 0x71),      // purple — pause markers
+            status: Color::Rgb(0x79, 0x74, 0x0e),     // olive — status label
+        }
+    }
+
     /// Dark theme — black background, phosphor green/amber.
     /// Classic retro CRT look. Better for indoor/dim environments.
     #[expect(dead_code)] // available for user toggle, not yet wired
@@ -100,6 +118,11 @@ impl Theme {
 /// appropriate status and the event loop can gate button actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
+    /// SenseVoice and/or RKLLM are still loading. The TUI shows a
+    /// dedicated loading screen until both `stt::STT_READY` and
+    /// `llm::LLM_READY` are set. ENTER presses during this state
+    /// are ignored.
+    Loading,
     /// Waiting for user to press START. No LLM activity.
     Idle,
     /// LLM is streaming tokens. Sentences appear one by one.
@@ -113,6 +136,7 @@ pub enum AppState {
 impl std::fmt::Display for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Loading => write!(f, "Loading"),
             Self::Idle => write!(f, "Idle"),
             Self::Generating => write!(f, "Generating"),
             Self::Paused => write!(f, "Paused"),
@@ -164,12 +188,12 @@ impl App {
         Self {
             all_lines: VecDeque::with_capacity(MAX_LINES),
             visible_count: 0,
-            state: AppState::Idle,
+            state: AppState::Loading,
             scroll: 0,
             token_count: 0,
             generation_start: None,
             pause_remaining: None,
-            theme: Theme::light(),
+            theme: Theme::gruvbox_light(),
         }
     }
 
@@ -200,6 +224,16 @@ impl App {
         // Auto-scroll: keep the bottom of the text visible.
         if self.visible_count > 5 {
             self.scroll = (self.visible_count - 5) as u16;
+        }
+    }
+
+    /// Transition out of `Loading` into `Idle` once both models are ready.
+    /// Safe to call repeatedly — only the first call sets `Idle`.
+    pub fn finish_loading(&mut self) {
+        if self.state == AppState::Loading {
+            self.state = AppState::Idle;
+            self.all_lines.clear();
+            self.visible_count = 0;
         }
     }
 
@@ -303,10 +337,54 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(header, chunks[0]);
 
-    // Body — meditation text with styled pause markers (sentence reveal)
-    let text_lines: Vec<Line> = app
-        .visible_lines()
-        .map(|s| {
+    // Body — either a centred "Loading models" screen while the
+    // SenseVoice + RKLLM cold loads are in flight, or the streamed
+    // meditation text. Falls through to the footer render either way.
+    if app.state == AppState::Loading {
+        let stt_ready = stt::STT_READY.load(std::sync::atomic::Ordering::Acquire);
+        let stage_msg = if stt_ready {
+            "Loading meditation model on NPU... (~2 min)"
+        } else {
+            "Loading speech recogniser..."
+        };
+        let loading_lines = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(Span::styled(
+                "༄  jhana-rs",
+                Style::default()
+                    .fg(t.accent)
+                    .bg(t.bg)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(""),
+            Line::from(Span::styled(
+                stage_msg,
+                Style::default().fg(t.body).bg(t.bg),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "(first run is slowest — please wait)",
+                Style::default().fg(t.title_dim).bg(t.bg),
+            )),
+        ];
+        let loading = Paragraph::new(loading_lines)
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
+                    .title(Span::styled(
+                        " loading ",
+                        Style::default().fg(t.status).bg(t.bg),
+                    )),
+            );
+        frame.render_widget(loading, chunks[1]);
+    } else {
+        let text_lines: Vec<Line> = app
+            .visible_lines()
+            .map(|s| {
             if s.starts_with("[pause") || s.starts_with('[') && s.ends_with(']') {
                 let inner = s.trim_start_matches('[').trim_end_matches(']');
                 Line::from(Span::styled(
@@ -327,19 +405,20 @@ pub fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    let body = Paragraph::new(text_lines)
-        .wrap(Wrap { trim: false })
-        .scroll((app.scroll, 0))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
-                .title(Span::styled(
-                    " meditation ",
-                    Style::default().fg(t.status).bg(t.bg),
-                )),
-        );
-    frame.render_widget(body, chunks[1]);
+        let body = Paragraph::new(text_lines)
+            .wrap(Wrap { trim: false })
+            .scroll((app.scroll, 0))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
+                    .title(Span::styled(
+                        " meditation ",
+                        Style::default().fg(t.status).bg(t.bg),
+                    )),
+            );
+        frame.render_widget(body, chunks[1]);
+    }
 
     // Footer — state, stats, pause countdown, and button mappings
     let status_spans = build_status_spans(app);
@@ -399,7 +478,7 @@ fn build_status_spans(app: &App) -> Vec<Span<'_>> {
                 Style::default().fg(t.accent_dim).bg(t.bg),
             ));
         }
-        AppState::Idle => {}
+        AppState::Idle | AppState::Loading => {}
     }
 
     spans
