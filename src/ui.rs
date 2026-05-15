@@ -156,6 +156,9 @@ const MAX_LINES: usize = 200;
 /// lifecycle state. Scroll offset exists because the Rock's 720x1280
 /// display at 32px font height gives only ~34 visible body rows —
 /// longer meditations need scrolling.
+/// Maximum number of lines retained in the console pane.
+const MAX_CONSOLE_LINES: usize = 50;
+
 pub struct App {
     /// All generated lines (the full meditation text so far).
     /// New lines are appended as the LLM streams them; once the buffer
@@ -164,6 +167,10 @@ pub struct App {
     /// `String`) because completed lines never grow and `Box<str>`
     /// drops the unused capacity word.
     all_lines: VecDeque<Box<str>>,
+    /// Console / status pane buffer — pipeline-state messages,
+    /// transcripts, errors, "Listening...", etc. Kept separate from
+    /// `all_lines` so the meditation pane stays clean.
+    console_lines: VecDeque<Box<str>>,
     /// Number of lines currently visible. During generation, this
     /// increases one sentence at a time for a reveal effect.
     /// When idle/done, equals `all_lines.len()`.
@@ -187,6 +194,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             all_lines: VecDeque::with_capacity(MAX_LINES),
+            console_lines: VecDeque::with_capacity(MAX_CONSOLE_LINES),
             visible_count: 0,
             state: AppState::Loading,
             scroll: 0,
@@ -227,6 +235,22 @@ impl App {
         }
     }
 
+    /// Append a status line to the console pane. The console pane sits
+    /// below the meditation pane and shows pipeline-state messages
+    /// (Listening..., transcripts, errors) without polluting the
+    /// generated meditation text.
+    pub fn push_console(&mut self, line: String) {
+        self.console_lines.push_back(line.into_boxed_str());
+        while self.console_lines.len() > MAX_CONSOLE_LINES {
+            self.console_lines.pop_front();
+        }
+    }
+
+    /// Read-only iterator over the recent console lines.
+    pub fn console_lines(&self) -> impl Iterator<Item = &str> {
+        self.console_lines.iter().map(|s| s.as_ref())
+    }
+
     /// Transition out of `Loading` into `Idle` once both models are ready.
     /// Safe to call repeatedly — only the first call sets `Idle`.
     pub fn finish_loading(&mut self) {
@@ -259,7 +283,9 @@ impl App {
         self.generation_start = None;
     }
 
-    /// Reset to [`AppState::Idle`], clearing all text and stats.
+    /// Reset to [`AppState::Idle`], clearing meditation text and stats
+    /// (but keeping the console pane so the user can still see what
+    /// happened last turn).
     pub fn reset(&mut self) {
         self.all_lines.clear();
         self.visible_count = 0;
@@ -310,11 +336,22 @@ pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // header
-            Constraint::Min(1),    // body
-            Constraint::Length(4), // footer
+            Constraint::Length(3),     // header
+            Constraint::Min(1),        // body — split below into meditation + console
+            Constraint::Length(4),     // footer
         ])
         .split(frame.area());
+
+    // Body splits 70/30 (meditation top, console bottom) so status
+    // messages, transcripts, and errors stay out of the meditation
+    // text — fixes the line-collision the user reported.
+    let body_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(70),
+            Constraint::Percentage(30),
+        ])
+        .split(chunks[1]);
 
     // Fill background
     frame.render_widget(Block::default().style(bg), frame.area());
@@ -381,31 +418,36 @@ pub fn render(frame: &mut Frame, app: &App) {
                     )),
             );
         frame.render_widget(loading, chunks[1]);
+        // Skip the meditation/console split while we're in Loading.
+        let footer = build_footer(app);
+        frame.render_widget(footer, chunks[2]);
+        return;
     } else {
+        // Meditation pane (top 70 %)
         let text_lines: Vec<Line> = app
             .visible_lines()
             .map(|s| {
-            if s.starts_with("[pause") || s.starts_with('[') && s.ends_with(']') {
-                let inner = s.trim_start_matches('[').trim_end_matches(']');
-                Line::from(Span::styled(
-                    format!("  · · · {inner} · · ·"),
-                    Style::default()
-                        .fg(t.pause)
-                        .bg(t.bg)
-                        .add_modifier(Modifier::DIM),
-                ))
-            } else if s.is_empty() {
-                Line::from("")
-            } else {
-                Line::from(Span::styled(
-                    format!("  {s}"),
-                    Style::default().fg(t.body).bg(t.bg),
-                ))
-            }
-        })
-        .collect();
+                if s.starts_with("[pause") || s.starts_with('[') && s.ends_with(']') {
+                    let inner = s.trim_start_matches('[').trim_end_matches(']');
+                    Line::from(Span::styled(
+                        format!("  · · · {inner} · · ·"),
+                        Style::default()
+                            .fg(t.pause)
+                            .bg(t.bg)
+                            .add_modifier(Modifier::DIM),
+                    ))
+                } else if s.is_empty() {
+                    Line::from("")
+                } else {
+                    Line::from(Span::styled(
+                        format!("  {s}"),
+                        Style::default().fg(t.body).bg(t.bg),
+                    ))
+                }
+            })
+            .collect();
 
-        let body = Paragraph::new(text_lines)
+        let meditation = Paragraph::new(text_lines)
             .wrap(Wrap { trim: false })
             .scroll((app.scroll, 0))
             .block(
@@ -417,10 +459,47 @@ pub fn render(frame: &mut Frame, app: &App) {
                         Style::default().fg(t.status).bg(t.bg),
                     )),
             );
-        frame.render_widget(body, chunks[1]);
+        frame.render_widget(meditation, body_chunks[0]);
+
+        // Console pane (bottom 30 %): pipeline state + recent
+        // transcripts / errors. Auto-scrolls to the bottom by taking
+        // only the last `console_h - 2` lines (border eats 2 rows).
+        let console_h = body_chunks[1].height.saturating_sub(2) as usize;
+        let total_console: Vec<&str> = app.console_lines().collect();
+        let start = total_console.len().saturating_sub(console_h);
+        let console_lines: Vec<Line> = total_console[start..]
+            .iter()
+            .map(|s| {
+                Line::from(Span::styled(
+                    format!("  {s}"),
+                    Style::default()
+                        .fg(t.title_dim)
+                        .bg(t.bg)
+                        .add_modifier(Modifier::DIM),
+                ))
+            })
+            .collect();
+        let console = Paragraph::new(console_lines)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
+                    .title(Span::styled(
+                        " console ",
+                        Style::default().fg(t.status).bg(t.bg),
+                    )),
+            );
+        frame.render_widget(console, body_chunks[1]);
     }
 
-    // Footer — state, stats, pause countdown, and button mappings
+    let footer = build_footer(app);
+    frame.render_widget(footer, chunks[2]);
+}
+
+/// Build the footer paragraph (status row + button legend).
+fn build_footer(app: &App) -> Paragraph<'_> {
+    let t = &app.theme;
     let status_spans = build_status_spans(app);
     let footer_lines = vec![
         Line::from(status_spans),
@@ -437,12 +516,11 @@ pub fn render(frame: &mut Frame, app: &App) {
             Span::styled(":quit", Style::default().fg(t.accent_dim).bg(t.bg)),
         ]),
     ];
-    let footer = Paragraph::new(footer_lines).block(
+    Paragraph::new(footer_lines).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(t.accent_dim).bg(t.bg)),
-    );
-    frame.render_widget(footer, chunks[2]);
+    )
 }
 
 /// Build the status line spans based on current app state.

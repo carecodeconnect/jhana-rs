@@ -34,7 +34,8 @@ use rkllm_rs::prelude::*;
 const DEFAULT_MODEL: &str = "/home/ubuntu/models/Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm";
 
 /// Maximum tokens to generate per meditation.
-const MAX_TOKENS: i32 = 512;
+// Max tokens per generation now lives in config/jhana.json under
+// the active model's `max_new_tokens` field.
 
 /// Global model handle — loaded once, reused across meditations.
 static MODEL: OnceLock<LLMHandle> = OnceLock::new();
@@ -213,22 +214,22 @@ fn get_or_load_model() -> Result<&'static LLMHandle, String> {
         return Ok(handle);
     }
 
-    let model_path =
-        std::env::var("RKLLM_MODEL_PATH").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    // Model + sampling parameters now come from `config/jhana.json`
+    // so we can swap among Llama 3B / 1B / Qwen3 1.7B (or any other
+    // .rkllm we drop into ~/models) by editing one file. The
+    // RKLLM_MODEL_PATH env var still wins for one-off overrides.
+    let m = crate::config::active_model();
+    let model_path = std::env::var("RKLLM_MODEL_PATH").unwrap_or_else(|_| m.path.clone());
 
-    info!("Loading RKLLM model from {model_path} (this takes ~2 minutes)...");
+    info!("Loading RKLLM model from {model_path} (cold load ~30–90 s)...");
 
     let mut config = LLMConfig::with_model_path(&model_path);
-    config.max_new_tokens = MAX_TOKENS;
-    // Shrink the KV cache from the model's baked-in 4096 to 1024 to
-    // save ~hundreds of MB of RAM. Meditation prompts are short
-    // (system prompt + one user sentence ≈ 300 tokens) so 1024 is
-    // ample headroom. See docs/11_BENCHMARKS.md "RAM efficiency".
-    config.max_context_len = 1024;
-    config.temperature = 0.7;
-    config.top_p = 0.9;
-    config.top_k = 40;
-    config.repeat_penalty = 1.1;
+    config.max_new_tokens = m.max_new_tokens;
+    config.max_context_len = m.max_context_len;
+    config.temperature = m.temperature;
+    config.top_p = m.top_p;
+    config.top_k = m.top_k;
+    config.repeat_penalty = m.repeat_penalty;
     config.frequency_penalty = 0.0;
     config.presence_penalty = 0.0;
 
@@ -300,7 +301,10 @@ fn run_inference(tx: &Sender<LlmOutput>, system: &str, user: &str) -> Result<(),
          {user}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
     );
 
-    info!("Starting NPU inference (max {MAX_TOKENS} tokens)");
+    info!(
+        "Starting NPU inference (max {} tokens)",
+        crate::config::active_model().max_new_tokens
+    );
 
     let handler = StreamHandler {
         tx: tx.clone(),

@@ -9,6 +9,7 @@
 //! Send SIGTERM or SIGINT to quit cleanly (no physical keyboard needed).
 //! Hardware buttons: BACK=quit, ENTER=start, UP/DOWN=scroll.
 
+mod config;
 mod gpio;
 mod llm;
 mod stt;
@@ -209,16 +210,16 @@ fn run_loop(
             match result {
                 SttResult::Recording => {
                     info!("STT: recording from mic");
-                    app.push_sentence("Listening...".to_string());
+                    app.push_console("Listening...".to_string());
                 }
                 SttResult::Processing => {
                     info!("STT: processing audio");
-                    app.push_sentence("Transcribing...".to_string());
+                    app.push_console("Transcribing...".to_string());
                 }
                 SttResult::Transcribed(text) => {
                     info!("STT transcribed: {text}");
                     app.reset();
-                    app.push_sentence(format!("You said: {text}"));
+                    app.push_console(format!("You said: {text}"));
                     // Feed transcription to LLM as the user prompt
                     match llm::load_prompts(DEFAULT_MEDITATION) {
                         Ok((system, _user)) => {
@@ -228,13 +229,13 @@ fn run_loop(
                         }
                         Err(e) => {
                             error!("Failed to load prompts: {e}");
-                            app.push_sentence(format!("Error: {e}"));
+                            app.push_console(format!("Error: {e}"));
                         }
                     }
                 }
                 SttResult::Error(e) => {
                     error!("STT error: {e}");
-                    app.push_sentence(format!("STT Error: {e}"));
+                    app.push_console(format!("STT Error: {e}"));
                     app.finish();
                 }
             }
@@ -260,7 +261,7 @@ fn run_loop(
                 }
                 LlmOutput::Error(e) => {
                     error!("LLM error: {e}");
-                    app.push_sentence(format!("Error: {e}"));
+                    app.push_console(format!("LLM Error: {e}"));
                     app.finish();
                 }
             }
@@ -296,14 +297,18 @@ fn run_loop(
 /// - Generating/Paused: ignored (generation is already in progress)
 fn handle_start(app: &mut App, stt_tx: &mpsc::Sender<stt::SttCommand>) {
     match app.state {
-        AppState::Idle => {
+        // From Idle OR Done: start a fresh listen. After a meditation
+        // finishes the user can press ENTER again to start a follow-up
+        // turn — the previous meditation text is cleared so the new
+        // session has a clean canvas.
+        AppState::Idle | AppState::Done => {
+            if app.state == AppState::Done {
+                info!("starting new turn — clearing previous meditation");
+                app.reset();
+            }
             info!("starting STT listen");
-            app.push_sentence("Speak your meditation request...".to_string());
+            app.push_console("Listening...".to_string());
             let _ = stt_tx.send(stt::SttCommand::Listen);
-        }
-        AppState::Done => {
-            info!("resetting to idle");
-            app.reset();
         }
         AppState::Generating | AppState::Paused => {
             info!("start pressed during generation — ignored");

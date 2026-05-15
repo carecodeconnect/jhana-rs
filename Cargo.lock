@@ -1329,6 +1329,7 @@ dependencies = [
  "ratatui",
  "rkllm-rs",
  "sensevoice-rs",
+ "serde",
  "serde_json",
  "signal-hook",
  "simplelog",
