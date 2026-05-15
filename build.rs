@@ -10,9 +10,10 @@
 fn main() {
     println!("cargo:rerun-if-changed=ui/jhana.slint");
     if let Err(e) = slint_build::compile("ui/jhana.slint") {
-        // Print the error but don't fail the build — non-slint binaries
-        // can still compile. The slint binary will error out at use site
-        // if compilation actually failed.
         eprintln!("slint-build: {e}");
+        // Fail the build with a clear message; the previous silent-swallow
+        // produced confusing "MainWindow / LogEntry not found" errors at
+        // use site instead of pointing at the actual .slint parse fault.
+        std::process::exit(1);
     }
 }

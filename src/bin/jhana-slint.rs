@@ -176,11 +176,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     main_window.set_pause_remaining(0);
 
     // Slint models live on the main thread — Rc, not Arc. The agent
-    // thread updates the log indirectly by sending AgentEvent through
+    // thread updates these indirectly by sending AgentEvent through
     // the channel; the Timer callback (main thread) consumes events
-    // and pushes to this model.
+    // and pushes to these models.
     let log_model: Rc<slint::VecModel<LogEntry>> = Rc::new(slint::VecModel::default());
     main_window.set_log_entries(slint::ModelRc::from(log_model.clone()));
+
+    // User pane: transcripts from listen() results, newest at bottom.
+    let user_model: Rc<slint::VecModel<slint::SharedString>> = Rc::new(slint::VecModel::default());
+    main_window.set_user_lines(slint::ModelRc::from(user_model.clone()));
 
     let session_running = Arc::new(AtomicBool::new(false));
 
@@ -212,6 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent_rx_for_timer = agent_rx.clone();
     let pause_state_for_timer = pause_state.clone();
     let bell_flash_for_timer = bell_flash_until.clone();
+    let user_model_for_timer = user_model.clone();
 
     // 10 Hz event-pump — fast enough for snappy UI updates, slow
     // enough to leave plenty of CPU for paroli/SenseVoice/RKLLM.
@@ -343,11 +348,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if name == "listen" && ok {
                             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&snippet)
                                 && let Some(t) = v.get("transcript").and_then(|t| t.as_str())
+                                && !t.trim().is_empty()
                             {
-                                log_model_for_timer.push(LogEntry {
-                                    kind: "user".into(),
-                                    text: t.into(),
-                                });
+                                // Push to the dedicated USER pane (top-level
+                                // section, green-coded) — not the activity log.
+                                user_model_for_timer.push(t.into());
                             }
                         }
                     }
