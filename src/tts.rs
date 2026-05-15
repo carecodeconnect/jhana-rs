@@ -36,9 +36,18 @@ pub enum TtsCommand {
     Stop,
 }
 
-/// ALSA playback device — Uctronics speaker, card 1 on Armbian with the
-/// uctronics-audio overlay loaded. `plughw:` handles sample-rate conversion.
-const PLAYBACK_DEVICE: &str = "plughw:1,0";
+/// PulseAudio system-mode socket (set up by pulseaudio.service on the
+/// Rock). We use PA rather than raw `aplay` so we get software mixing,
+/// the original baseline's 100 %-sink-volume loudness path, and no
+/// per-utterance ALSA open (which on the Uctronics codec triggers a
+/// speaker-amp pop every time). See docs/09_AUDIO.md "Reference: the
+/// original AI in a Box loudness path".
+const PULSE_SERVER: &str = "unix:/var/run/pulse/native";
+
+/// PulseAudio sink the Uctronics speaker exposes. Set as the default
+/// sink in /etc/pulse/system.pa, but we pass it explicitly here to be
+/// robust against module-default-device-restore resetting it.
+const PULSE_SINK: &str = "alsa_output.platform-uctronics-sound.stereo-fallback";
 
 /// espeak-ng amplitude (0–200). 100 is the default and was the cleanest
 /// non-distorting setting on the Uctronics speaker in A/B testing —
@@ -141,14 +150,15 @@ fn speak_sentence(sentence: &str) {
         }
     }
 
-    match Command::new("aplay")
-        .args(["-q", "-D", PLAYBACK_DEVICE, WAV_PATH])
+    match Command::new("paplay")
+        .env("PULSE_SERVER", PULSE_SERVER)
+        .args(["--device", PULSE_SINK, WAV_PATH])
         .output()
     {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
-            error!("aplay failed: {}", String::from_utf8_lossy(&output.stderr));
+            error!("paplay failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        Err(e) => error!("aplay error: {e}"),
+        Err(e) => error!("paplay error: {e}"),
     }
 }
