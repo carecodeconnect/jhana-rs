@@ -55,6 +55,27 @@ big-text meditation surface the whole time.
 
 ## Recommendations
 
+## Visual direction (user-stated, 2026-05-15)
+
+The target aesthetic is **"a loading screen from the 80s/90s"**:
+
+- Pixel-art-style chunky letters; no anti-aliasing, hard edges.
+- Limited palette (4-8 colours) with one or two strong accents on a
+  neutral ground — phosphor-green-on-black, amber-on-black, or
+  warm-cream-on-soft-cream like a Mac SE manual.
+- Big retro-blocky type for the focal sentence and the loading state.
+- A loading bar / dot animation while models warm up.
+- Pixel-art-style decorative elements — a meditating monk silhouette,
+  a sumi-e ensō circle, a candle, a static mandala — appearing in the
+  focal card when nothing else is active.
+- Slow, deliberate transitions (no easing curves you'd see in a 2024
+  web app; think `setInterval(redraw, 100ms)` step animation).
+
+Reachable under ratatui+kmscon **partially** (with thoughtful unicode
+art and palette restraint) but most of the visual vocabulary above —
+sub-cell pixel art, alpha-blended dot animations, custom pixel fonts
+loaded at boot — needs a real GUI framework. That's the Slint phase.
+
 ### Phase A (ship-today, low-risk): kmscon — STAGED 2026-05-15
 
 Implementation is **staged** in the repo, awaiting the next Rock-online

@@ -46,12 +46,32 @@ ssh "${ROCK_USER}@${ROCK_HOST}" "
     sudo systemctl stop getty@tty1.service 2>/dev/null || true
 "
 
-step "5/5  Enable and start jhana-rs-kmscon"
+step "5/6  Disable apt's auto-installed kmsconvt@tty1 (would conflict with ours)"
+ssh "${ROCK_USER}@${ROCK_HOST}" "sudo systemctl disable --now kmsconvt@tty1.service 2>&1 | tail -3 || true"
+
+step "6/6  Enable and start jhana-rs-kmscon"
 ssh "${ROCK_USER}@${ROCK_HOST}" "
     sudo systemctl daemon-reload
     sudo systemctl enable --now jhana-rs-kmscon.service
     sleep 4
     sudo systemctl is-active jhana-rs-kmscon.service
+"
+
+# Persist DRM panel rotation for kmscon. fbcon=rotate:1 only rotates
+# the in-kernel framebuffer console — kmscon uses uterm_drm directly
+# and ignores that flag. video=DSI-1:rotate=90 rotates at the DRM
+# connector level, which kmscon respects. Idempotent: only adds the
+# flag if it isn't already in extraargs. Requires reboot to apply.
+step "Persist DRM rotation in /boot/armbianEnv.txt (reboot required)"
+ssh "${ROCK_USER}@${ROCK_HOST}" "
+    sudo cp -n /boot/armbianEnv.txt /boot/armbianEnv.txt.pre-kmscon || true
+    if ! grep -q 'video=DSI-1:rotate' /boot/armbianEnv.txt; then
+        sudo sed -i 's|^\(extraargs=.*\)|\1 video=DSI-1:rotate=90|' /boot/armbianEnv.txt
+        echo 'Added video=DSI-1:rotate=90 to extraargs. Reboot the Rock to apply.'
+    else
+        echo 'video=DSI-1:rotate already in extraargs; no change.'
+    fi
+    grep ^extraargs /boot/armbianEnv.txt
 "
 
 echo
