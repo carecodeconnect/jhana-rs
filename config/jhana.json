@@ -58,7 +58,7 @@
   "ui": {
     "default_meditation": "lotus_flower",
     "welcome_lines": [
-      "Welcome to jhana-rs.",
+      "Hi, I'm Jhana, your personal meditation guide.",
       "Press the enter button to begin a meditation.",
       "Press back to quit."
     ]
