@@ -8,6 +8,10 @@ license = "MIT"
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
+# Big-text glyph rendering (font8x8 blown up via half/quadrant/sextant
+# pixel mode). Required for the meditation pane's large-type display.
+# 0.7.3 is the last release compatible with ratatui 0.29.
+tui-big-text = "0.7.3"
 log = "0.4"
 simplelog = "0.12"
 signal-hook = "0.3"

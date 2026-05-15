@@ -1,560 +1,626 @@
-//! TUI rendering for jhana-rs using ratatui.
+//! TUI rendering for jhana-rs.
 //!
-//! Ratatui was chosen over a graphical toolkit because it runs in any
-//! terminal with no X11, Wayland, or GPU driver — critical for the Rock 5A
-//! which renders directly to a DRM/KMS framebuffer console.
-//!
-//! The retro phosphor-green/amber palette is deliberate: it's calming,
-//! high-contrast on the small 720x1280 portrait display, and fun during
-//! development. The layout targets 45 columns x 40 rows (`TerminusBold`
-//! 32x16 console font — the largest available, chosen to approximate the
-//! original pygame captioning service's 70px Noto font).
-//!
-//! # Layout
+//! Layout — pure vertical stacking for the Rock's 720×1280 portrait
+//! display (≈45 cols × 40 rows at TerminusBold 32×16). Borrows from
+//! the survey in `docs/14_TODO.md` task #20 (timr-tui's clock card +
+//! header/footer chips, tui-big-text quadrant rendering, rdn's
+//! double-border-for-focus, demo2's bg-colour status strip).
 //!
 //! ```text
-//! ┌── jhana-rs ─────────────────────┐
-//! │  ༄  jhana-rs  ～ breathe ～     │
-//! ├─────────────────────────────────┤
-//! │                                 │
-//! │  Close your eyes and take a     │
-//! │  deep breath in.                │
-//! │                                 │
-//! │  · · · 5s · · ·                 │
-//! │                                 │
-//! ├─────────────────────────────────┤
-//! │  ◈ Generating  47 tok  6.2 t/s  │
-//! │  ←quit →start ↑up ↓down q:quit │
-//! └─────────────────────────────────┘
+//!  ── jhana  ────────────────── listening ──   ← status strip (bg = state colour)
+//!                                                gap
+//! ╔═══════════════════════════════════════════╗ ← focal card (double border)
+//! ║                                           ║
+//! ║   ████  ████  █████ ████  █  █  █████     ║   active-tool canvas:
+//! ║   █  █  █     █     █  █  █  █    █       ║   - say(): big-text + mirror
+//! ║   ████  ███   ████  ████  ████    █       ║   - listen(): listening + transcript
+//! ║   █  █  █     █     █  █  █  █    █       ║   - pause(N): countdown big-text
+//! ║   ████  ████  █████ ████  █  █    █       ║   - ring_bell(): ♪ glyph
+//! ║                                           ║
+//! ║   the body knows the breath already       ║   plain-text mirror of say()
+//! ║                                           ║
+//! ╚═══════════════════════════════════════════╝
+//!                                                gap
+//!   activity                                    ← log section label
+//!   ─────────────────────────────────────────
+//!   > you said: "loving-kindness please"        ← log, dim, newest at bottom
+//!     spoke: "the body knows the breath..."
+//!     tool: ring_bell()
+//!     tool: pause(10s)
+//!  ── back: quit  enter: speak  ↑↓: scroll ──   ← footer hint chip (dim)
 //! ```
 
 use std::collections::VecDeque;
 use std::time::Instant;
-
-use crate::stt;
 
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
 };
+use tui_big_text::{BigText, PixelSize};
 
-/// Color theme for the TUI.
-///
-/// RGB colors are used instead of terminal palette indices because the
-/// Rock's `TERM=linux` console supports 24-bit color via DRM/KMS, and
-/// fixed RGB values ensure consistent appearance regardless of terminal
-/// theme.
+// ---------- Theme ----------
+
+/// Light, calm palette borrowed from gruvbox light-hard. One body
+/// colour, one dim colour, one chip colour per state. Resist adding
+/// more accents — the meditation surface stays calmer with restraint.
 pub struct Theme {
-    /// Background color for all widgets.
-    pub bg: Color,
-    /// Primary accent — titles, highlights.
-    pub accent: Color,
-    /// Dim accent — secondary text, borders.
-    pub accent_dim: Color,
-    /// Title secondary — "breathe" subtitle.
-    pub title_dim: Color,
-    /// Body text — meditation sentences.
-    pub body: Color,
-    /// Pause marker styling.
-    pub pause: Color,
-    /// Status text — state label.
-    pub status: Color,
+    pub bg: Color,           // cream
+    pub fg: Color,           // near-black, body text
+    pub dim: Color,          // grey, log entries
+    pub border: Color,       // border colour
+    pub idle_bg: Color,      // warm grey strip
+    pub listening_bg: Color, // soft green strip
+    pub speaking_bg: Color,  // soft blue strip
+    pub pausing_bg: Color,   // soft amber strip
+    pub thinking_bg: Color,  // pale lavender strip
 }
 
 impl Theme {
-    /// Light theme — white background, retro green/amber accents.
-    /// High contrast for outdoor use on the Rock's 720x1280 display.
-    /// Inspired by classic terminal-on-white (x61s i3 style).
-    pub const fn light() -> Self {
+    /// Gruvbox light-hard, single-accent calm palette.
+    pub const fn calm_light() -> Self {
         Self {
-            bg: Color::White,           // standard white bg (works on TERM=linux)
-            accent: Color::DarkGray,    // dark gray — titles, button labels
-            accent_dim: Color::Gray,    // gray — borders, secondary text
-            title_dim: Color::DarkGray, // subtitle
-            body: Color::Black,         // black — main meditation text
-            pause: Color::DarkGray,     // pause markers
-            status: Color::DarkGray,    // status label
-        }
-    }
-
-    /// Gruvbox-light theme — calm cream background with the gruvbox
-    /// orange/olive/purple palette. Easy on the eyes for long
-    /// meditation sessions and reads cleanly on the small DSI panel.
-    /// Colors taken from Pawel Wieczorek's canonical gruvbox palette.
-    pub const fn gruvbox_light() -> Self {
-        Self {
-            bg: Color::Rgb(0xfb, 0xf1, 0xc7),         // bg0  — soft cream
-            accent: Color::Rgb(0xd6, 0x5d, 0x0e),     // orange — title, highlight
-            accent_dim: Color::Rgb(0xa8, 0x99, 0x84), // gray  — borders, secondary
-            title_dim: Color::Rgb(0xaf, 0x3a, 0x03),  // dark orange — subtitle
-            body: Color::Rgb(0x3c, 0x38, 0x36),       // fg1   — body text
-            pause: Color::Rgb(0x8f, 0x3f, 0x71),      // purple — pause markers
-            status: Color::Rgb(0x79, 0x74, 0x0e),     // olive — status label
-        }
-    }
-
-    /// Dark theme — black background, phosphor green/amber.
-    /// Classic retro CRT look. Better for indoor/dim environments.
-    #[expect(dead_code)] // available for user toggle, not yet wired
-    pub const fn dark() -> Self {
-        Self {
-            bg: Color::Reset,                    // terminal default (black)
-            accent: Color::Rgb(255, 176, 0),     // amber — titles, highlights
-            accent_dim: Color::Rgb(40, 110, 60), // dim green — borders
-            title_dim: Color::Rgb(160, 110, 0),  // dim amber — subtitle
-            body: Color::Rgb(200, 200, 180),     // soft white — main text
-            pause: Color::Rgb(120, 100, 180),    // purple — pause markers
-            status: Color::Rgb(80, 220, 120),    // phosphor green — status
+            bg: Color::Rgb(0xf9, 0xf5, 0xd7),           // gruvbox bg0_h, cream
+            fg: Color::Rgb(0x3c, 0x38, 0x36),           // gruvbox fg1, near-black
+            dim: Color::Rgb(0x7c, 0x6f, 0x64),          // gruvbox gray, log
+            border: Color::Rgb(0x68, 0x5a, 0x4e),       // darker gray for borders
+            idle_bg: Color::Rgb(0xeb, 0xdb, 0xb2),      // bg2, warm grey
+            listening_bg: Color::Rgb(0xb8, 0xbb, 0x26), // gruvbox green-bright
+            speaking_bg: Color::Rgb(0x83, 0xa5, 0x98),  // gruvbox blue
+            pausing_bg: Color::Rgb(0xd6, 0x5d, 0x0e),   // gruvbox orange
+            thinking_bg: Color::Rgb(0xb1, 0x6c, 0xeb),  // gruvbox purple
         }
     }
 }
 
-/// Application lifecycle state.
-///
-/// Tracks where we are in the meditation flow so the TUI can show
-/// appropriate status and the event loop can gate button actions.
+// ---------- App state ----------
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
-    /// SenseVoice and/or RKLLM are still loading. The TUI shows a
-    /// dedicated loading screen until both `stt::STT_READY` and
-    /// `llm::LLM_READY` are set. ENTER presses during this state
-    /// are ignored.
+    /// Models still warming up. Show the loading screen until both
+    /// `stt::STT_READY` and `llm::LLM_READY` are set. ENTER ignored.
     Loading,
-    /// Waiting for user to press START. No LLM activity.
+    /// Session not active. Waiting for ENTER.
     Idle,
-    /// LLM is streaming tokens. Sentences appear one by one.
+    /// Agent is thinking — model is generating tokens for the next turn.
     Generating,
-    /// A `[pause N]` marker is active. Countdown in progress.
+    /// Pause tool is sleeping (silent gap during meditation).
     Paused,
-    /// LLM finished generating. All text displayed.
+    /// Session finished. ENTER starts a new one.
     Done,
 }
 
-impl std::fmt::Display for AppState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl AppState {
+    fn label(self) -> &'static str {
         match self {
-            Self::Loading => write!(f, "Loading"),
-            Self::Idle => write!(f, "Idle"),
-            Self::Generating => write!(f, "Generating"),
-            Self::Paused => write!(f, "Paused"),
-            Self::Done => write!(f, "Done"),
+            Self::Loading => "loading",
+            Self::Idle => "idle",
+            Self::Generating => "thinking",
+            Self::Paused => "pausing",
+            Self::Done => "done",
         }
     }
 }
 
-/// Application state displayed in the TUI.
-///
-/// Maximum number of text lines retained in memory. Older lines are
-/// dropped from the front of the deque so a long-running session does
-/// not grow unbounded — see docs/11_BENCHMARKS.md "RAM efficiency".
-const MAX_LINES: usize = 200;
+/// Which agent tool is currently in flight. Drives the focal card
+/// rendering — see `render_focal_card`.
+#[derive(Debug, Clone)]
+pub enum ActiveTool {
+    Speaking,
+    Listening,
+    Pausing { ends_at: Instant, total_secs: f32 },
+    RingingBell,
+}
 
-/// Holds the meditation text, scroll position, generation stats, and
-/// lifecycle state. Scroll offset exists because the Rock's 720x1280
-/// display at 32px font height gives only ~34 visible body rows —
-/// longer meditations need scrolling.
-/// Maximum number of lines retained in the console pane.
-const MAX_CONSOLE_LINES: usize = 50;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogKind {
+    UserSpeech,
+    AgentSpoke,
+    ToolCall,
+    System,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub kind: LogKind,
+    pub text: String,
+}
+
+const MAX_LOG: usize = 200;
 
 pub struct App {
-    /// All generated lines (the full meditation text so far).
-    /// New lines are appended as the LLM streams them; once the buffer
-    /// reaches `MAX_LINES` the oldest lines are dropped from the front
-    /// to keep peak RSS bounded. `Box<str>` is used (rather than
-    /// `String`) because completed lines never grow and `Box<str>`
-    /// drops the unused capacity word.
-    all_lines: VecDeque<Box<str>>,
-    /// Console / status pane buffer — pipeline-state messages,
-    /// transcripts, errors, "Listening...", etc. Kept separate from
-    /// `all_lines` so the meditation pane stays clean.
-    console_lines: VecDeque<Box<str>>,
-    /// Number of lines currently visible. During generation, this
-    /// increases one sentence at a time for a reveal effect.
-    /// When idle/done, equals `all_lines.len()`.
-    visible_count: usize,
-    /// Current lifecycle state.
     pub state: AppState,
-    /// Vertical scroll offset into the text (0 = top).
-    pub scroll: u16,
-    /// Total tokens generated in the current session.
-    pub token_count: u32,
-    /// When the current generation started (for tokens/sec calculation).
-    generation_start: Option<Instant>,
-    /// Active pause countdown: seconds remaining. `None` if not pausing.
-    pub pause_remaining: Option<f32>,
-    /// Color theme — light (outdoor) or dark (indoor/retro CRT).
+    /// Most recent say() text — shown in the focal card.
+    pub current_say: Option<String>,
+    /// Which tool is currently dispatching.
+    pub active_tool: Option<ActiveTool>,
+    /// Activity log (newest at end).
+    log: VecDeque<LogEntry>,
+    /// Scroll offset within the log (0 = bottom).
+    pub log_scroll: u16,
     pub theme: Theme,
+    /// Total tokens generated this session — left intact for future
+    /// status-line wiring, even though we removed the noisy stats row.
+    pub token_count: u32,
 }
 
 impl App {
-    /// Create a new [`App`] in [`AppState::Idle`] with the light theme (outdoor).
     pub fn new() -> Self {
         Self {
-            all_lines: VecDeque::with_capacity(MAX_LINES),
-            console_lines: VecDeque::with_capacity(MAX_CONSOLE_LINES),
-            visible_count: 0,
             state: AppState::Loading,
-            scroll: 0,
+            current_say: None,
+            active_tool: None,
+            log: VecDeque::with_capacity(MAX_LOG),
+            log_scroll: 0,
+            theme: Theme::calm_light(),
             token_count: 0,
-            generation_start: None,
-            pause_remaining: None,
-            theme: Theme::gruvbox_light(),
         }
     }
 
-    /// Lines currently visible in the TUI (for sentence-by-sentence reveal).
-    pub fn visible_lines(&self) -> impl Iterator<Item = &str> {
-        let end = self.visible_count.min(self.all_lines.len());
-        self.all_lines.iter().take(end).map(|s| s.as_ref())
-    }
-
-    /// Push a new sentence and make it visible immediately.
-    ///
-    /// Called when the LLM emits a complete sentence. The sentence appears
-    /// at the bottom of the text area. Auto-scrolls to keep the latest text
-    /// in view, even if the user previously scrolled up — the meditation
-    /// text should always follow the live generation. Drops the oldest
-    /// pair of lines when the deque exceeds `MAX_LINES` to bound RAM.
-    #[expect(clippy::cast_possible_truncation)] // line counts are small
-    pub fn push_sentence(&mut self, sentence: String) {
-        self.all_lines.push_back(sentence.into_boxed_str());
-        // Add a blank line after each sentence/pause for vertical spacing.
-        // This makes the text more spacious and meditative, and naturally
-        // limits the visible content to ~5-8 items on the 40-row display.
-        self.all_lines.push_back(Box::from(""));
-        while self.all_lines.len() > MAX_LINES {
-            self.all_lines.pop_front();
-        }
-        self.visible_count = self.all_lines.len();
-        // Auto-scroll: keep the bottom of the text visible.
-        if self.visible_count > 5 {
-            self.scroll = (self.visible_count - 5) as u16;
-        }
-    }
-
-    /// Append a status line to the console pane. The console pane sits
-    /// below the meditation pane and shows pipeline-state messages
-    /// (Listening..., transcripts, errors) without polluting the
-    /// generated meditation text.
-    pub fn push_console(&mut self, line: String) {
-        self.console_lines.push_back(line.into_boxed_str());
-        while self.console_lines.len() > MAX_CONSOLE_LINES {
-            self.console_lines.pop_front();
-        }
-    }
-
-    /// Read-only iterator over the recent console lines.
-    pub fn console_lines(&self) -> impl Iterator<Item = &str> {
-        self.console_lines.iter().map(|s| s.as_ref())
-    }
-
-    /// Transition out of `Loading` into `Idle` once both models are ready.
-    /// Safe to call repeatedly — only the first call sets `Idle`.
     pub fn finish_loading(&mut self) {
         if self.state == AppState::Loading {
             self.state = AppState::Idle;
-            self.all_lines.clear();
-            self.visible_count = 0;
+            self.current_say = None;
+            self.active_tool = None;
         }
     }
 
-    /// Transition to [`AppState::Generating`] and start the speed timer.
     pub fn start_generating(&mut self) {
         self.state = AppState::Generating;
         self.token_count = 0;
-        self.generation_start = Some(Instant::now());
     }
 
-    /// Transition to [`AppState::Paused`] with a countdown duration.
-    /// Not yet used — will be activated when LLM outputs `[pause N]` markers.
-    #[expect(dead_code)]
-    pub fn start_pause(&mut self, seconds: f32) {
-        self.state = AppState::Paused;
-        self.pause_remaining = Some(seconds);
-    }
-
-    /// Transition to [`AppState::Done`].
     pub fn finish(&mut self) {
         self.state = AppState::Done;
-        self.pause_remaining = None;
-        self.generation_start = None;
+        self.active_tool = None;
     }
 
-    /// Reset to [`AppState::Idle`], clearing meditation text and stats
-    /// (but keeping the console pane so the user can still see what
-    /// happened last turn).
     pub fn reset(&mut self) {
-        self.all_lines.clear();
-        self.visible_count = 0;
         self.state = AppState::Idle;
-        self.scroll = 0;
+        self.current_say = None;
+        self.active_tool = None;
         self.token_count = 0;
-        self.generation_start = None;
-        self.pause_remaining = None;
+        // Keep log — user can scroll back to see previous session.
     }
 
-    /// Tokens per second since generation started. Returns 0.0 if not generating.
-    #[allow(clippy::cast_precision_loss)] // token counts are small; f32 is fine
-    pub fn tokens_per_sec(&self) -> f32 {
-        self.generation_start.map_or(0.0, |start| {
-            let elapsed = start.elapsed().as_secs_f32();
-            if elapsed > 0.0 {
-                self.token_count as f32 / elapsed
-            } else {
-                0.0
+    /// Record a tool call dispatching. Sets the active-tool canvas state.
+    pub fn note_tool_start(&mut self, name: &str, args: &serde_json::Value) {
+        let display = format!("→ {name}{}", short_args(args));
+        self.push_log(LogKind::ToolCall, display);
+        self.active_tool = match name {
+            "say" => {
+                if let Some(text) = args.get("text").and_then(|v| v.as_str()) {
+                    self.current_say = Some(text.to_string());
+                    self.push_log(LogKind::AgentSpoke, text.to_string());
+                }
+                Some(ActiveTool::Speaking)
             }
-        })
+            "listen" => Some(ActiveTool::Listening),
+            "pause" => {
+                let secs = args.get("seconds").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                let ends_at = Instant::now() + std::time::Duration::from_secs_f32(secs);
+                self.state = AppState::Paused;
+                Some(ActiveTool::Pausing {
+                    ends_at,
+                    total_secs: secs,
+                })
+            }
+            "ring_bell" => Some(ActiveTool::RingingBell),
+            _ => None,
+        };
     }
 
-    /// Scroll text up by one line. Clamped at the top.
+    /// Record a tool result. Clears the active-tool canvas for tools
+    /// that are now done; for listen/transcript results, surface the
+    /// user's speech to the log.
+    pub fn note_tool_result(&mut self, name: &str, ok: bool, snippet: &str) {
+        if name == "listen" && ok {
+            // Tease out the transcript field from the snippet which
+            // looks like {"transcript":"hello teach me"}
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(snippet)
+                && let Some(t) = v.get("transcript").and_then(|v| v.as_str())
+            {
+                self.push_log(LogKind::UserSpeech, t.to_string());
+            }
+        }
+        let marker = if ok { "✓" } else { "✗" };
+        self.push_log(LogKind::System, format!("{marker} {name}"));
+        self.active_tool = None;
+        // Coming out of pause returns to Generating until the next turn fires.
+        if self.state == AppState::Paused {
+            self.state = AppState::Generating;
+        }
+    }
+
+    pub fn push_system(&mut self, text: String) {
+        self.push_log(LogKind::System, text);
+    }
+
+    fn push_log(&mut self, kind: LogKind, text: String) {
+        self.log.push_back(LogEntry { kind, text });
+        while self.log.len() > MAX_LOG {
+            self.log.pop_front();
+        }
+    }
+
+    pub fn log_entries(&self) -> impl Iterator<Item = &LogEntry> {
+        self.log.iter()
+    }
+
     pub fn scroll_up(&mut self) {
-        self.scroll = self.scroll.saturating_sub(1);
+        self.log_scroll = self.log_scroll.saturating_add(1);
     }
 
-    /// Scroll text down by one line.
-    ///
-    /// No upper clamp here — ratatui's [`Paragraph`] handles overflow
-    /// gracefully by showing blank space past the end.
     pub fn scroll_down(&mut self) {
-        self.scroll = self.scroll.saturating_add(1);
+        self.log_scroll = self.log_scroll.saturating_sub(1);
     }
 }
 
-/// Render the TUI layout to the given frame.
-///
-/// The layout is split into three vertical sections:
-/// - **Header**: retro banner with zen motif
-/// - **Body**: meditation text with pause markers styled (sentence reveal)
-/// - **Footer**: state, stats, pause countdown, and button mappings
+/// Truncate JSON args for a one-line console display.
+fn short_args(args: &serde_json::Value) -> String {
+    if args.is_null()
+        || (args.is_object() && args.as_object().is_some_and(serde_json::Map::is_empty))
+    {
+        "()".to_string()
+    } else if let Some(text) = args.get("text").and_then(|v| v.as_str()) {
+        if text.len() > 40 {
+            format!("(\"{}…\")", &text[..40])
+        } else {
+            format!("(\"{text}\")")
+        }
+    } else if let Some(secs) = args.get("seconds") {
+        format!("({secs}s)")
+    } else if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
+        format!("(\"{name}\")")
+    } else {
+        let s = args.to_string();
+        if s.len() > 30 {
+            format!("({}…)", &s[..30])
+        } else {
+            format!("({s})")
+        }
+    }
+}
+
+// ---------- Rendering ----------
+
 pub fn render(frame: &mut Frame, app: &App) {
     let t = &app.theme;
-    let bg = Style::default().bg(t.bg);
+    let area = frame.area();
+
+    // Background fill
+    frame.render_widget(Block::default().style(Style::default().bg(t.bg)), area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // header
-            Constraint::Min(1),    // body — split below into meditation + console
-            Constraint::Length(4), // footer
+            Constraint::Length(1),  // status strip
+            Constraint::Length(1),  // gap
+            Constraint::Length(16), // focal card (border 2 + content 14)
+            Constraint::Length(1),  // gap
+            Constraint::Min(3),     // activity log
+            Constraint::Length(1),  // footer
         ])
-        .split(frame.area());
+        .split(area);
 
-    // Body splits 70/30 (meditation top, console bottom) so status
-    // messages, transcripts, and errors stay out of the meditation
-    // text — fixes the line-collision the user reported.
-    let body_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(chunks[1]);
+    render_status_strip(frame, chunks[0], app);
+    if app.state == AppState::Loading {
+        render_loading_card(frame, chunks[2], app);
+    } else {
+        render_focal_card(frame, chunks[2], app);
+    }
+    render_log(frame, chunks[4], app);
+    render_footer(frame, chunks[5], app);
+}
 
-    // Fill background
-    frame.render_widget(Block::default().style(bg), frame.area());
+fn render_status_strip(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let t = &app.theme;
+    let bg = match app.state {
+        AppState::Idle | AppState::Done => t.idle_bg,
+        AppState::Generating => t.thinking_bg,
+        AppState::Paused => t.pausing_bg,
+        AppState::Loading => t.idle_bg,
+    };
+    let bg_override = match &app.active_tool {
+        Some(ActiveTool::Speaking) => Some(t.speaking_bg),
+        Some(ActiveTool::Listening) => Some(t.listening_bg),
+        _ => None,
+    };
+    let final_bg = bg_override.unwrap_or(bg);
 
-    // Header — retro zen banner
-    let banner = vec![Line::from(vec![
+    // "── jhana ───────────────── <state> ──"
+    let label = match (&app.active_tool, app.state) {
+        (Some(ActiveTool::Speaking), _) => "speaking",
+        (Some(ActiveTool::Listening), _) => "listening",
+        (Some(ActiveTool::Pausing { .. }), _) => "pausing",
+        (Some(ActiveTool::RingingBell), _) => "ringing",
+        (None, s) => s.label(),
+    };
+
+    let title = format!(" ── jhana ");
+    let suffix = format!(" {label} ── ");
+    let middle_len = area
+        .width
+        .saturating_sub(title.chars().count() as u16)
+        .saturating_sub(suffix.chars().count() as u16) as usize;
+    let middle: String = "─".repeat(middle_len);
+
+    let line = Line::from(vec![
         Span::styled(
-            "༄  jhana-rs  ",
+            title,
             Style::default()
-                .fg(t.accent)
-                .bg(t.bg)
+                .fg(t.fg)
+                .bg(final_bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("～ breathe ～", Style::default().fg(t.title_dim).bg(t.bg)),
-    ])];
-    let header = Paragraph::new(banner).alignment(Alignment::Center).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(t.accent_dim).bg(t.bg)),
+        Span::styled(middle, Style::default().fg(t.fg).bg(final_bg)),
+        Span::styled(
+            suffix,
+            Style::default()
+                .fg(t.fg)
+                .bg(final_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().bg(final_bg)),
+        area,
     );
-    frame.render_widget(header, chunks[0]);
+}
 
-    // Body — either a centred "Loading models" screen while the
-    // SenseVoice + RKLLM cold loads are in flight, or the streamed
-    // meditation text. Falls through to the footer render either way.
-    if app.state == AppState::Loading {
-        let stt_ready = stt::STT_READY.load(std::sync::atomic::Ordering::Acquire);
-        let stage_msg = if stt_ready {
-            "Loading meditation model on NPU... (~2 min)"
-        } else {
-            "Loading speech recogniser..."
-        };
-        let loading_lines = vec![
-            Line::from(""),
-            Line::from(""),
-            Line::from(Span::styled(
-                "༄  jhana-rs",
-                Style::default()
-                    .fg(t.accent)
-                    .bg(t.bg)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(""),
-            Line::from(Span::styled(
-                stage_msg,
-                Style::default().fg(t.body).bg(t.bg),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "(first run is slowest — please wait)",
-                Style::default().fg(t.title_dim).bg(t.bg),
-            )),
-        ];
-        let loading = Paragraph::new(loading_lines)
-            .alignment(Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
-                    .title(Span::styled(
-                        " loading ",
-                        Style::default().fg(t.status).bg(t.bg),
-                    )),
+fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let t = &app.theme;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(t.border).bg(t.bg))
+        .style(Style::default().bg(t.bg));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Split inner into big-text region + plain mirror region.
+    let inner_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // top padding
+            Constraint::Length(6), // big text (5 rows for Quadrant + 1 buffer)
+            Constraint::Length(1), // gap
+            Constraint::Min(2),    // plain-text mirror (wrapped)
+            Constraint::Length(1), // bottom padding
+        ])
+        .split(inner);
+
+    // Big-text content depends on active tool.
+    let (big_lines, mirror_lines): (Vec<Line>, Vec<Line>) = match &app.active_tool {
+        Some(ActiveTool::Pausing {
+            ends_at,
+            total_secs,
+        }) => {
+            let remaining = ends_at
+                .saturating_duration_since(Instant::now())
+                .as_secs_f32();
+            let big = format!("{}", remaining.ceil() as u32);
+            let mirror = format!(
+                "silence  ·  {}/{}s",
+                (total_secs - remaining).ceil() as u32,
+                *total_secs as u32
             );
-        frame.render_widget(loading, chunks[1]);
-        // Skip the meditation/console split while we're in Loading.
-        let footer = build_footer(app);
-        frame.render_widget(footer, chunks[2]);
-        return;
+            (vec![Line::from(big)], vec![center_line(&mirror, &t.dim)])
+        }
+        Some(ActiveTool::RingingBell) => (vec![Line::from("♪")], vec![center_line("bell", &t.dim)]),
+        Some(ActiveTool::Listening) => (
+            vec![Line::from("listening")],
+            vec![center_line("· · · ·", &t.dim)],
+        ),
+        _ => {
+            // Default: show the most recent say() text. If none, show
+            // a soft tagline.
+            let text = app.current_say.as_deref().unwrap_or("be still").to_string();
+            let big_short = pick_big_phrase(&text);
+            let mirror = wrap_text(&text, inner_chunks[3].width as usize);
+            let mirror_lines: Vec<Line> =
+                mirror.into_iter().map(|s| center_line(&s, &t.fg)).collect();
+            (vec![Line::from(big_short)], mirror_lines)
+        }
+    };
+
+    let big_text = BigText::builder()
+        .pixel_size(PixelSize::Quadrant)
+        .style(Style::default().fg(t.fg).bg(t.bg))
+        .alignment(Alignment::Center)
+        .lines(big_lines)
+        .build();
+    frame.render_widget(big_text, inner_chunks[1]);
+
+    let mirror = Paragraph::new(mirror_lines)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(t.bg));
+    frame.render_widget(mirror, inner_chunks[3]);
+}
+
+fn render_loading_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let t = &app.theme;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(t.border).bg(t.bg))
+        .style(Style::default().bg(t.bg));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let big_text = BigText::builder()
+        .pixel_size(PixelSize::Quadrant)
+        .style(Style::default().fg(t.fg).bg(t.bg))
+        .alignment(Alignment::Center)
+        .lines(vec![Line::from("loading")])
+        .build();
+    let inner_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(6),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+    frame.render_widget(big_text, inner_chunks[1]);
+    let stt_ready = crate::stt::STT_READY.load(std::sync::atomic::Ordering::Acquire);
+    let stage = if stt_ready {
+        "warming the meditation model (≈80 s)"
     } else {
-        // Meditation pane (top 70 %)
-        let text_lines: Vec<Line> = app
-            .visible_lines()
-            .map(|s| {
-                if s.starts_with("[pause") || s.starts_with('[') && s.ends_with(']') {
-                    let inner = s.trim_start_matches('[').trim_end_matches(']');
-                    Line::from(Span::styled(
-                        format!("  · · · {inner} · · ·"),
-                        Style::default()
-                            .fg(t.pause)
-                            .bg(t.bg)
-                            .add_modifier(Modifier::DIM),
-                    ))
-                } else if s.is_empty() {
-                    Line::from("")
-                } else {
-                    Line::from(Span::styled(
-                        format!("  {s}"),
-                        Style::default().fg(t.body).bg(t.bg),
-                    ))
-                }
-            })
-            .collect();
+        "warming the speech recogniser"
+    };
+    let p = Paragraph::new(stage)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(t.dim).bg(t.bg));
+    frame.render_widget(p, inner_chunks[2]);
+}
 
-        let meditation = Paragraph::new(text_lines)
-            .wrap(Wrap { trim: false })
-            .scroll((app.scroll, 0))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
-                    .title(Span::styled(
-                        " meditation ",
-                        Style::default().fg(t.status).bg(t.bg),
-                    )),
-            );
-        frame.render_widget(meditation, body_chunks[0]);
+fn render_log(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let t = &app.theme;
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // label
+            Constraint::Length(1), // rule
+            Constraint::Min(1),    // entries
+        ])
+        .split(area);
 
-        // Console pane (bottom 30 %): pipeline state + recent
-        // transcripts / errors. Auto-scrolls to the bottom by taking
-        // only the last `console_h - 2` lines (border eats 2 rows).
-        let console_h = body_chunks[1].height.saturating_sub(2) as usize;
-        let total_console: Vec<&str> = app.console_lines().collect();
-        let start = total_console.len().saturating_sub(console_h);
-        let console_lines: Vec<Line> = total_console[start..]
-            .iter()
-            .map(|s| {
-                Line::from(Span::styled(
-                    format!("  {s}"),
+    let label = Paragraph::new(Line::from(Span::styled(
+        " activity",
+        Style::default().fg(t.dim).bg(t.bg),
+    )))
+    .style(Style::default().bg(t.bg));
+    frame.render_widget(label, chunks[0]);
+
+    let rule_text: String = std::iter::repeat('─').take(area.width as usize).collect();
+    let rule = Paragraph::new(Line::from(Span::styled(
+        rule_text,
+        Style::default().fg(t.dim).bg(t.bg),
+    )))
+    .style(Style::default().bg(t.bg));
+    frame.render_widget(rule, chunks[1]);
+
+    // Render entries with newest at bottom, respecting log_scroll.
+    let h = chunks[2].height as usize;
+    let total: Vec<&LogEntry> = app.log_entries().collect();
+    let skip_from_end = app.log_scroll as usize;
+    let end = total.len().saturating_sub(skip_from_end);
+    let start = end.saturating_sub(h);
+    let lines: Vec<Line> = total[start..end]
+        .iter()
+        .map(|e| {
+            let (prefix, style) = match e.kind {
+                LogKind::UserSpeech => (
+                    "  > you: ",
                     Style::default()
-                        .fg(t.title_dim)
+                        .fg(t.fg)
+                        .bg(t.bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                LogKind::AgentSpoke => ("  spoke: ", Style::default().fg(t.fg).bg(t.bg)),
+                LogKind::ToolCall => ("  ", Style::default().fg(t.dim).bg(t.bg)),
+                LogKind::System => (
+                    "  ",
+                    Style::default()
+                        .fg(t.dim)
                         .bg(t.bg)
                         .add_modifier(Modifier::DIM),
-                ))
-            })
-            .collect();
-        let console = Paragraph::new(console_lines)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(t.accent_dim).bg(t.bg))
-                    .title(Span::styled(
-                        " console ",
-                        Style::default().fg(t.status).bg(t.bg),
-                    )),
-            );
-        frame.render_widget(console, body_chunks[1]);
+                ),
+            };
+            Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(
+                    truncate(&e.text, area.width.saturating_sub(12) as usize),
+                    style,
+                ),
+            ])
+        })
+        .collect();
+    let p = Paragraph::new(lines).style(Style::default().bg(t.bg));
+    frame.render_widget(p, chunks[2]);
+}
+
+fn render_footer(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
+    let t = &app.theme;
+    let line = Line::from(vec![
+        Span::styled(" ── ", Style::default().fg(t.dim).bg(t.bg)),
+        Span::styled("back ", Style::default().fg(t.fg).bg(t.bg)),
+        Span::styled("quit  ", Style::default().fg(t.dim).bg(t.bg)),
+        Span::styled("enter ", Style::default().fg(t.fg).bg(t.bg)),
+        Span::styled("start  ", Style::default().fg(t.dim).bg(t.bg)),
+        Span::styled("↑↓ ", Style::default().fg(t.fg).bg(t.bg)),
+        Span::styled("scroll ", Style::default().fg(t.dim).bg(t.bg)),
+        Span::styled("──", Style::default().fg(t.dim).bg(t.bg)),
+    ]);
+    frame.render_widget(Paragraph::new(line).style(Style::default().bg(t.bg)), area);
+}
+
+// ---------- Helpers ----------
+
+fn center_line<'a>(s: &str, fg: &Color) -> Line<'a> {
+    Line::from(Span::styled(s.to_string(), Style::default().fg(*fg)))
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
     }
-
-    let footer = build_footer(app);
-    frame.render_widget(footer, chunks[2]);
 }
 
-/// Build the footer paragraph (status row + button legend).
-fn build_footer(app: &App) -> Paragraph<'_> {
-    let t = &app.theme;
-    let status_spans = build_status_spans(app);
-    let footer_lines = vec![
-        Line::from(status_spans),
-        Line::from(vec![
-            Span::styled("  ←", Style::default().fg(t.accent).bg(t.bg)),
-            Span::styled("quit ", Style::default().fg(t.accent_dim).bg(t.bg)),
-            Span::styled("→", Style::default().fg(t.accent).bg(t.bg)),
-            Span::styled("start ", Style::default().fg(t.accent_dim).bg(t.bg)),
-            Span::styled("↑", Style::default().fg(t.accent).bg(t.bg)),
-            Span::styled("up ", Style::default().fg(t.accent_dim).bg(t.bg)),
-            Span::styled("↓", Style::default().fg(t.accent).bg(t.bg)),
-            Span::styled("down ", Style::default().fg(t.accent_dim).bg(t.bg)),
-            Span::styled("q", Style::default().fg(t.accent).bg(t.bg)),
-            Span::styled(":quit", Style::default().fg(t.accent_dim).bg(t.bg)),
-        ]),
-    ];
-    Paragraph::new(footer_lines).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(t.accent_dim).bg(t.bg)),
-    )
-}
-
-/// Build the status line spans based on current app state.
-fn build_status_spans(app: &App) -> Vec<Span<'_>> {
-    let t = &app.theme;
-    let mut spans = vec![
-        Span::styled("  ◈ ", Style::default().fg(t.accent).bg(t.bg)),
-        Span::styled(
-            app.state.to_string(),
-            Style::default().fg(t.status).bg(t.bg),
-        ),
-    ];
-
-    match app.state {
-        AppState::Generating => {
-            let tps = app.tokens_per_sec();
-            spans.push(Span::styled(
-                format!("  {} tok  {tps:.1} t/s", app.token_count),
-                Style::default().fg(t.accent_dim).bg(t.bg),
-            ));
-        }
-        AppState::Paused => {
-            if let Some(remaining) = app.pause_remaining {
-                spans.push(Span::styled(
-                    format!("  · · · {remaining:.0}s · · ·"),
-                    Style::default().fg(t.pause).bg(t.bg),
-                ));
+/// Pick a short, ~10-char-or-less phrase from the say text to render
+/// in the big-text region. Tries to find the first natural phrase
+/// boundary (comma, period, dash), else truncates.
+fn pick_big_phrase(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return "be still".to_string();
+    }
+    // Find first phrase boundary
+    for delim in [". ", ", ", " — ", "; ", "? ", "! "] {
+        if let Some(idx) = trimmed.find(delim) {
+            let chunk = &trimmed[..idx];
+            if chunk.chars().count() <= 14 {
+                return chunk.to_string();
             }
         }
-        AppState::Done => {
-            spans.push(Span::styled(
-                format!("  {} tok", app.token_count),
-                Style::default().fg(t.accent_dim).bg(t.bg),
-            ));
-        }
-        AppState::Idle | AppState::Loading => {}
     }
+    // Fallback: take first 12 chars, break at word boundary if possible
+    let chars: String = trimmed.chars().take(14).collect();
+    if let Some(last_space) = chars.rfind(' ') {
+        chars[..last_space].to_string()
+    } else {
+        chars
+    }
+}
 
-    spans
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current = word.to_string();
+        } else if current.chars().count() + 1 + word.chars().count() <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            out.push(current);
+            current = word.to_string();
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
 }

@@ -107,7 +107,7 @@ fn main() -> io::Result<()> {
     info!("terminal initialized, entering event loop");
 
     let mut app = App::new();
-    app.push_sentence("Loading models...".to_string());
+    app.push_system("Loading models...".to_string());
 
     // Welcome-speech thread runs only in ratatui mode. In agent mode
     // the model emits its own greeting via `say("Hello?")` on the first
@@ -231,32 +231,36 @@ fn run_loop(
             match result {
                 SttResult::Recording => {
                     info!("STT: recording from mic");
-                    app.push_console("Listening...".to_string());
+                    app.push_system("listening…".to_string());
                 }
                 SttResult::Processing => {
                     info!("STT: processing audio");
-                    app.push_console("Transcribing...".to_string());
+                    app.push_system("transcribing…".to_string());
                 }
                 SttResult::Transcribed(text) => {
                     info!("STT transcribed: {text}");
                     app.reset();
-                    app.push_console(format!("You said: {text}"));
-                    // Feed transcription to LLM as the user prompt
+                    // Surface the user's transcript as a UserSpeech log entry
+                    // by routing through the same path the agent uses.
+                    app.note_tool_result(
+                        "listen",
+                        true,
+                        &serde_json::json!({ "transcript": text }).to_string(),
+                    );
                     match llm::load_prompts(&config::get().ui.default_meditation) {
                         Ok((system, _user)) => {
                             app.start_generating();
-                            // Use the transcribed text as the user prompt
                             llm::start_streaming(llm_tx.clone(), system, text);
                         }
                         Err(e) => {
                             error!("Failed to load prompts: {e}");
-                            app.push_console(format!("Error: {e}"));
+                            app.push_system(format!("Error: {e}"));
                         }
                     }
                 }
                 SttResult::Error(e) => {
                     error!("STT error: {e}");
-                    app.push_console(format!("STT Error: {e}"));
+                    app.push_system(format!("STT Error: {e}"));
                     app.finish();
                 }
             }
@@ -268,20 +272,22 @@ fn run_loop(
                 LlmOutput::Sentence(s) => {
                     info!("sentence: {s}");
                     app.token_count += estimate_tokens(&s);
-                    // Send to TTS thread for spoken output
                     let _ = tts_tx.send(tts::TtsCommand::Speak(s.clone()));
-                    app.push_sentence(s);
+                    // In ratatui mode, treat each LLM sentence as a
+                    // virtual `say` tool start so it appears in the
+                    // focal card. The "current" sentence is the latest.
+                    app.note_tool_start("say", &serde_json::json!({ "text": s.clone() }));
+                    app.note_tool_result("say", true, "{\"status\":\"spoken\"}");
                 }
                 LlmOutput::Pause(n) => {
                     info!("pause: {n:.0}s");
-                    app.push_sentence(format!("[pause {n:.0}s]"));
-                    // Forward to TTS so the device actually goes silent
-                    // for n seconds instead of speaking "N seconds".
+                    app.note_tool_start("pause", &serde_json::json!({ "seconds": n }));
                     let _ = tts_tx.send(tts::TtsCommand::Pause(n));
                 }
                 LlmOutput::Bell => {
                     info!("bell");
-                    app.push_sentence("[bell]".to_string());
+                    app.note_tool_start("ring_bell", &serde_json::json!({}));
+                    app.note_tool_result("ring_bell", true, "{\"status\":\"rung\"}");
                     let _ = tts_tx.send(tts::TtsCommand::Bell);
                 }
                 LlmOutput::Done => {
@@ -290,7 +296,7 @@ fn run_loop(
                 }
                 LlmOutput::Error(e) => {
                     error!("LLM error: {e}");
-                    app.push_console(format!("LLM Error: {e}"));
+                    app.push_system(format!("LLM Error: {e}"));
                     app.finish();
                 }
             }
@@ -373,35 +379,21 @@ fn run_loop_agent(
         // Drain agent events (non-blocking)
         while let Ok(event) = agent_rx.try_recv() {
             match event {
-                AgentEvent::Sentence(s) => {
-                    // Raw model stream — includes the `<tool_call>{...}`
-                    // wrapper text. Do NOT pipe to TTS (the say() tool
-                    // dispatch handles audio cleanly); show truncated
-                    // in the console pane for debug. The meditation
-                    // pane is populated by the say() tool dispatch
-                    // pushing the actual spoken text — see below.
-                    info!("agent sentence: {s}");
-                    app.token_count += estimate_tokens(&s);
-                    let preview: String = s.chars().take(80).collect();
-                    app.push_console(format!("· {preview}"));
+                AgentEvent::Sentence(_s) => {
+                    // Raw model stream — contains <tool_call> wrapper text.
+                    // The new TUI doesn't surface this directly; the
+                    // ToolStart/ToolResult events below carry the
+                    // human-meaningful content. Stream sentences are
+                    // discarded here (still logged to file for debug).
+                    app.token_count += 1;
                 }
                 AgentEvent::ToolStart { name, args } => {
                     info!("agent tool start: {name}({args})");
-                    app.push_console(format!("→ {name}({})", summarize_args(&args)));
-                    // For say(), surface the actual spoken text in the
-                    // meditation pane — that's what the user hears, so
-                    // that's what should appear large on screen. The
-                    // raw stream event still goes to console (above).
-                    if name == "say"
-                        && let Some(text) = args.get("text").and_then(|v| v.as_str())
-                    {
-                        app.push_sentence(text.to_string());
-                    }
+                    app.note_tool_start(&name, &args);
                 }
                 AgentEvent::ToolResult { name, ok, snippet } => {
                     info!("agent tool result: {name} ok={ok} {snippet}");
-                    let marker = if ok { "✓" } else { "✗" };
-                    app.push_console(format!("{marker} {name}: {snippet}"));
+                    app.note_tool_result(&name, ok, &snippet);
                 }
                 AgentEvent::Done => {
                     app.finish();
@@ -409,7 +401,7 @@ fn run_loop_agent(
                 }
                 AgentEvent::Error(e) => {
                     error!("agent error: {e}");
-                    app.push_console(format!("Agent Error: {e}"));
+                    app.push_system(format!("agent error: {e}"));
                     app.finish();
                 }
             }
@@ -577,7 +569,7 @@ fn handle_start(app: &mut App, stt_tx: &mpsc::Sender<stt::SttCommand>) {
                 app.reset();
             }
             info!("starting STT listen");
-            app.push_console("Listening...".to_string());
+            app.push_system("listening…".to_string());
             let _ = stt_tx.send(stt::SttCommand::Listen);
         }
         AppState::Generating | AppState::Paused => {
