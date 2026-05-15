@@ -62,12 +62,16 @@ fn main() -> io::Result<()> {
     // LLM output channel — background streaming thread sends here
     let (llm_tx, llm_rx) = mpsc::channel::<LlmOutput>();
 
+    // TTS background thread — receives sentences to speak aloud.
+    // Spawned before STT so we can hand a clone of tts_tx to the STT
+    // thread; the "Speak now" cue now routes through the TTS thread
+    // (instead of paplay-direct) to keep it from overlapping any
+    // in-flight TTS output.
+    let tts_tx = tts::start();
+
     // STT background thread — receives listen commands, sends back transcriptions
     let (stt_result_tx, stt_result_rx) = mpsc::channel::<SttResult>();
-    let stt_tx = stt::start(stt_result_tx);
-
-    // TTS background thread — receives sentences to speak aloud
-    let tts_tx = tts::start();
+    let stt_tx = stt::start(stt_result_tx, tts_tx.clone());
 
     // Pre-load the RKLLM model in the background so first ENTER press
     // doesn't pay the 37–74 s NPU init. Welcome speech + STT cold load

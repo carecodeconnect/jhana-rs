@@ -44,6 +44,11 @@ static MOONSHINE_WORKER: Mutex<Option<MoonshineWorker>> = Mutex::new(None);
 pub enum TtsCommand {
     /// Speak this sentence aloud.
     Speak(String),
+    /// Speak and signal completion on the provided channel — used by
+    /// STT to play the "Speak now" cue and only open the mic once
+    /// the cue has actually finished, instead of letting paplay
+    /// overlap with whatever the TTS thread is playing.
+    SpeakAndAck(String, Sender<()>),
     /// Silent pause for this many seconds. Honoured by the TTS thread
     /// (it sleeps) so the user actually experiences the pause instead
     /// of hearing "fifteen seconds" spoken aloud.
@@ -115,6 +120,10 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
     while let Ok(cmd) = rx.recv() {
         match cmd {
             TtsCommand::Speak(sentence) => speak_sentence(&sentence),
+            TtsCommand::SpeakAndAck(sentence, ack) => {
+                speak_sentence(&sentence);
+                let _ = ack.send(());
+            }
             TtsCommand::Pause(seconds) => {
                 let clamped = seconds.clamp(0.0, 120.0);
                 info!("TTS: pausing {clamped:.1}s");

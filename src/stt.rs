@@ -157,14 +157,17 @@ fn render_cue() {
     }
 }
 
-pub fn start(result_tx: Sender<SttResult>) -> Sender<SttCommand> {
+pub fn start(
+    result_tx: Sender<SttResult>,
+    tts_tx: Sender<crate::tts::TtsCommand>,
+) -> Sender<SttCommand> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SttCommand>();
 
     std::thread::Builder::new()
         .name("stt".into())
         .spawn(move || {
             info!("STT thread started");
-            stt_loop(&cmd_rx, &result_tx);
+            stt_loop(&cmd_rx, &result_tx, &tts_tx);
             info!("STT thread exiting");
         })
         .expect("failed to spawn STT thread");
@@ -173,7 +176,11 @@ pub fn start(result_tx: Sender<SttResult>) -> Sender<SttCommand> {
 }
 
 /// STT event loop — loads model once, then processes listen commands.
-fn stt_loop(cmd_rx: &Receiver<SttCommand>, result_tx: &Sender<SttResult>) {
+fn stt_loop(
+    cmd_rx: &Receiver<SttCommand>,
+    result_tx: &Sender<SttResult>,
+    tts_tx: &Sender<crate::tts::TtsCommand>,
+) {
     // Use cached model files without contacting HuggingFace on every start.
     // First run requires internet; subsequent runs use ~/.cache/huggingface/.
     // Safety: called before any other threads use this env var.
@@ -202,15 +209,14 @@ fn stt_loop(cmd_rx: &Receiver<SttCommand>, result_tx: &Sender<SttResult>) {
     );
     STT_READY.store(true, Ordering::Release);
 
-    // Pre-render the 'Speak now.' cue via the configured TTS engine so
-    // each press just hits paplay (cheap). Falls back to espeak-ng if
-    // paroli isn't configured / fails. Cached at /tmp/jhana_speak_now.wav.
-    render_cue();
+    // The "Speak now" cue is now spoken through the TTS thread (so it
+    // serialises with anything else the TTS is playing — no overlap).
+    // No pre-rendered cache file needed any more.
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             SttCommand::Listen => {
-                listen_and_transcribe(&svs, result_tx);
+                listen_and_transcribe(&svs, result_tx, tts_tx);
             }
             SttCommand::Stop => {
                 info!("STT stop requested");
@@ -225,20 +231,21 @@ fn stt_loop(cmd_rx: &Receiver<SttCommand>, result_tx: &Sender<SttResult>) {
 }
 
 /// Record from mic, transcribe, and send result.
-fn listen_and_transcribe(svs: &SenseVoiceSmall, result_tx: &Sender<SttResult>) {
+fn listen_and_transcribe(
+    svs: &SenseVoiceSmall,
+    result_tx: &Sender<SttResult>,
+    tts_tx: &Sender<crate::tts::TtsCommand>,
+) {
     // Signal that we're recording
     let _ = result_tx.send(SttResult::Recording);
 
-    // Audible "Speak now" cue (pre-rendered at thread startup via
-    // render_cue() — paroli where available, espeak-ng otherwise).
-    let _ = Command::new("paplay")
-        .env("PULSE_SERVER", "unix:/var/run/pulse/native")
-        .args([
-            "--device",
-            "alsa_output.platform-uctronics-sound.stereo-fallback",
-            CUE_WAV,
-        ])
-        .status();
+    // "Speak now" cue goes through the TTS thread so it serialises
+    // with anything else the TTS is mid-speaking (no PA mixing the
+    // cue on top of an in-flight sentence). Wait for the synchronous
+    // ack before opening arecord.
+    let (ack_tx, ack_rx) = std::sync::mpsc::channel::<()>();
+    let _ = tts_tx.send(crate::tts::TtsCommand::SpeakAndAck("Speak now.".to_string(), ack_tx));
+    let _ = ack_rx.recv_timeout(std::time::Duration::from_secs(15));
 
     // Record from mic via arecord
     let wav_path = PathBuf::from(RECORD_PATH);
