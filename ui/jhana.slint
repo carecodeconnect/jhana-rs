@@ -219,10 +219,14 @@ export component MainWindow inherits Window {
     in property <int> pause-remaining: 0;
     in property <[LogEntry]> log-entries: [];
 
-    // Rock 5A DSI panel — 720 wide × 1280 tall (rotated at the DRM
-    // level via video=DSI-1:rotate=90).
-    width: 720px;
-    height: 1280px;
+    // Rock 5A DSI panel: hardware framebuffer is 720×1280 (portrait
+    // native per DRM). SLINT_KMS_ROTATION=90 rotates the Slint
+    // surface 90° CW before sending it to the panel — so we need to
+    // DECLARE the window as 1280×720 (landscape) here, and Slint's
+    // post-rotation framebuffer becomes 720×1280 fitting the panel
+    // exactly. If you change SLINT_KMS_ROTATION, swap these too.
+    width: 1280px;
+    height: 720px;
     background: Theme.dark.base;
     no-frame: true;
     title: "jhana";

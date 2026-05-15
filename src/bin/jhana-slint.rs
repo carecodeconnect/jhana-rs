@@ -213,9 +213,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pause_state_for_timer = pause_state.clone();
     let bell_flash_for_timer = bell_flash_until.clone();
 
+    // 10 Hz event-pump — fast enough for snappy UI updates, slow
+    // enough to leave plenty of CPU for paroli/SenseVoice/RKLLM.
+    // Pause countdowns tick once a second so we don't need 30+ Hz.
     event_timer.start(
         slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(33),
+        std::time::Duration::from_millis(100),
         move || {
             let Some(window) = weak.upgrade() else { return };
 
@@ -259,7 +262,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Bell flash auto-clear: ring_bell doesn't have a meaningful
             // ToolResult delay, so we time-bound the "ringing" state.
-            if let Some(deadline) = *bell_flash_for_timer.borrow()
+            // Clone the deadline out so the immutable borrow drops
+            // before we try a mutable borrow (otherwise RefCell panics
+            // with "already borrowed").
+            let bell_deadline = *bell_flash_for_timer.borrow();
+            if let Some(deadline) = bell_deadline
                 && Instant::now() >= deadline
             {
                 if window.get_active_tool() == slint::SharedString::from("ringing") {
@@ -268,8 +275,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *bell_flash_for_timer.borrow_mut() = None;
             }
 
-            // Tick the pause countdown if one is in flight.
-            if let Some((start, total)) = *pause_state_for_timer.borrow() {
+            // Tick the pause countdown if one is in flight. Same
+            // borrow-then-mutate dance as above.
+            let pause_snapshot = *pause_state_for_timer.borrow();
+            if let Some((start, total)) = pause_snapshot {
                 let elapsed = start.elapsed().as_secs_f32();
                 let remaining = (total - elapsed).max(0.0);
                 window.set_pause_remaining(remaining.ceil() as i32);

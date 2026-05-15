@@ -481,8 +481,10 @@ fn dispatch_tool(call: &ToolCall, ctx: &AgentCtx) -> Result<Value, AgentError> {
             ctx.tts_tx
                 .send(crate::tts::TtsCommand::SpeakAndAck(a.text.clone(), ack_tx))
                 .map_err(|e| AgentError::Tool(format!("tts channel: {e}")))?;
+            // 120 s to accommodate first-call paroli encoder+decoder
+            // cold-load on the NPU. Subsequent calls are 2-3 s.
             ack_rx
-                .recv_timeout(Duration::from_secs(60))
+                .recv_timeout(Duration::from_secs(120))
                 .map_err(|_| AgentError::Tool("tts timeout".into()))?;
             Ok(json!({ "status": "spoken" }))
         }
