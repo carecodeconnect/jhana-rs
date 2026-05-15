@@ -25,23 +25,28 @@ list updated whenever a new failure mode is found:
 |------|-------------------------------------------------------------------------------------|-------------------------------------|
 | 2026-05-15 | `fragment@1`: add `rockchip,clk-trcm = <1>` AND `/delete-property/ rockchip,trcm-sync-tx-only` on `i2s@fe480000` | Boot hangs in userspace, no network |
 | 2026-05-15 | `fragment@1`: add `rockchip,clk-trcm = <1>` alone on `i2s@fe480000`                  | Boot hangs in userspace, no network |
-| 2026-05-15 | `fragment@0`: add `sdmode-gpios` + `gainsel_{1,2,3}-gpios` + `default-volume` to `audio-codec-0`, **drop `pinctrl-0` from fragment@1** | Boot hangs (Tailscale offline; under investigation — likely the dropped pinctrl-0, since GPIOs alone on audio-codec-0 should be inert) |
+| 2026-05-15 | `fragment@0`: add `sdmode-gpios` + `gainsel_{1,2,3}-gpios` + `default-volume` to `audio-codec-0`, **drop `pinctrl-0` from fragment@1** | Boot hangs (Tailscale offline). Initially blamed on missing pinctrl-0; pinctrl-0 was restored on the next iteration and boot STILL hung. |
+| 2026-05-15 | Same as above but with `pinctrl-0` restored on `fragment@1`. | Boot still hangs. **Root cause turned out to be a misread of the baseline DT**: the GPIO phandle `0x16a` used by the baseline audio-codec-0 belongs to `gpio@fec20000` (= GPIO bank **1**), not `gpio@fec40000` (= bank 3). Our overlay had been declaring `&gpio3` for sdmode/gainsel; on Armbian those GPIO3 pins are claimed/pinmuxed for something else and grabbing them hung systemd. Fix: switch to `&gpio1` (next attempt). |
 
-### Known-good overlay structure
+### Known-good overlay structure (2026-05-15, after GPIO bank fix)
 
-The minimum overlay that brings up the codec card without breaking boot
-is the originally-deployed `.bak`:
+The current `hardware/uctronics-audio/uctronics-audio-overlay.dts`:
 
-- `audio-codec-0` with `compatible = "uctronics,uctronics-codec"`, no
-  GPIO properties, no `default-volume`.
+- `audio-codec-0` with `compatible = "uctronics,uctronics-codec"`,
+  `sdmode-gpios = <&gpio1 13 0>` (GPIO1_B5), `gainsel_{1,2,3}-gpios`
+  on `&gpio1 3/5/2`, `default-volume = <2>`. **All on bank 1, not
+  bank 3** — see history table above.
 - `uctronics-sound` with the multicodecs binding to `&i2s1_8ch`.
 - `fragment@1` on `&i2s1_8ch`: `status = "okay"`,
   `rockchip,playback-channels = <2>`, `rockchip,capture-channels = <2>`,
   **and an explicit `pinctrl-0 = <&i2s1m0_lrck &i2s1m0_sclk &i2s1m0_sdi0 &i2s1m0_sdo0>;`**.
+- **No** `rockchip,clk-trcm` and **no** `/delete-property/ rockchip,trcm-sync-tx-only`.
 
-Mic capture works at S32_LE 48 kHz with this overlay (the volume mixer
-is a no-op since the GPIOs aren't wired, but the speaker is still
-audible at hardware-default gain).
+Mic capture works at S32_LE 48 kHz. Speaker plays with `sdmode` driven
+correctly. The gain GPIOs are claimed (`sdmode=yes gain=2` in
+codec dmesg) but **the 5 gain levels produced no perceptible volume
+difference** in side-by-side testing; see `docs/09_AUDIO.md` for the
+working theories. Use software amplification for now.
 
 ### When in doubt
 

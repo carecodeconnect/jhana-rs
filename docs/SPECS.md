@@ -90,6 +90,86 @@ Decision is deferred until the `/mnt/projects/pi` interface is more
 concrete; until then jhana-rs continues to be implemented as a
 hand-rolled Rust pipeline.
 
+### Interaction design: Moore's Natural Conversation Framework
+
+The conversational UX for jhana-rs is designed against **Robert J.
+Moore's Natural Conversation Framework (NCF)** from IBM Research,
+which applies findings from **Conversation Analysis (CA)** — the
+sociolinguistic study of how humans actually take turns, repair
+misunderstandings, and structure dialogue — to the design of
+conversational AI systems.
+
+Whereas typical chatbots flatten dialogue into a request → response
+loop, NCF treats the unit of interaction as a **sequence** built from
+CA primitives:
+
+- **Adjacency pairs** — first-pair-parts (e.g. *question, request,
+  invitation*) project a constrained set of second-pair-parts
+  (*answer, grant/decline, accept/refuse*). The meditation guide
+  should respect what kind of response its previous utterance has
+  made expectable.
+- **Preference organisation** — within a pair, certain second-pair-
+  parts are preferred (an *acceptance* after an invitation) while
+  others are dispreferred (a *refusal*); dispreferred turns are
+  typically delayed, mitigated, and accounted for. Important for
+  asking the user to commit to a longer meditation than they wanted.
+- **Pre-sequences** — turns that test the ground before a main action
+  ("are you ready?" before "close your eyes"). NCF makes these
+  first-class so the system warms the user up rather than launching.
+- **Repair sequences** — self- and other-initiated repair when the
+  user mishears, the STT mis-transcribes, or the LLM produces an
+  off-topic instruction. The agent must recognise repair-initiations
+  ("what?", "sorry, again?") and re-do the last turn rather than
+  charging on.
+- **Closing sequences** — proper closings ("we'll stop here. how was
+  that?") instead of abrupt stops, important for meditation where
+  reorientation matters.
+
+NCF then layers a **dialogue-act vocabulary** on top of these (e.g.
+*request_open_session*, *acknowledge*, *offer_instruction*,
+*confirm_understanding*, *initiate_closing*) and an authoring model
+where designers script sequences rather than individual responses.
+For jhana-rs the practical implication is that the LLM is not the
+whole conversational logic: there is a sequence layer above it that
+tracks the projected next-action set, gates the LLM's output, and
+routes user input to either the meditation flow or to repair.
+
+Primary references:
+
+- Moore, An, Ahmed & Gala, **"NC-Bench: An LLM Benchmark for
+  Evaluating Conversational Competence"** (arxiv 2601.06426, 2026) —
+  uses the Natural Conversation Framework as the spine of a
+  benchmark for LLM dialogue competence across three suites (basic
+  interaction patterns, information retrieval scenarios, complex
+  multi-turn exchanges). The paper reports that current models do
+  well on straightforward turns but **struggle specifically with
+  repair, closings, and complex requests** — the exact failure
+  modes jhana-rs has to handle gracefully in a meditation context.
+  <https://arxiv.org/abs/2601.06426>
+- Moore & Arar, *Conversational UX Design: A Practitioner's Guide to
+  the Natural Conversation Framework* (ACM Books, 2019) — the
+  canonical book-length treatment of NCF.
+- Moore, "A Natural Conversation Framework for Conversational AI
+  Systems" and related IBM Research write-ups on
+  <https://research.ibm.com> describing the framework's dialogue-act
+  vocabulary and sequence-authoring model.
+- Sacks, Schegloff & Jefferson, "A Simplest Systematics for the
+  Organization of Turn-Taking for Conversation" (*Language*, 50:4,
+  1974) — the founding CA paper, gives us the turn-taking model NCF
+  inherits.
+- Schegloff, *Sequence Organization in Interaction* (Cambridge,
+  2007) — definitive treatment of sequences, adjacency pairs,
+  preference, pre-sequences and repair.
+- Liddicoat, *An Introduction to Conversation Analysis* (2nd ed.,
+  2011) — readable CA textbook if Schegloff is too dense.
+
+NC-Bench's failure-mode list (repair, closings, complex requests) is
+a useful **internal eval target** for jhana-rs: we can sample
+relevant test prompts from the public NC-Bench suite and run them
+against whichever on-device model we settle on, to validate that
+the meditation guide behaves correctly when the user interrupts,
+asks for a repeat, or ends the session mid-sequence.
+
 
 
 ---

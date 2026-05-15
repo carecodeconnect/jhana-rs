@@ -9,11 +9,12 @@
  * driver in the Useful Sensors baseline image (kernel 5.10.110-102).
  * Disassembly: 7 text functions at 0xbda1c8-0xbda5d4.
  *
- * GPIO bindings (from device tree):
- *   sdmode-gpios     = GPIO3_B5  — speaker amp enable (active high)
- *   gainsel_1-gpios  = GPIO3_A3  — gain select bit (MSB)
- *   gainsel_2-gpios  = GPIO3_A5  — gain select mid
- *   gainsel_3-gpios  = GPIO3_A2  — gain select bit (LSB)
+ * GPIO bindings (from device tree). Pins are on GPIO bank 1
+ * (gpio@fec20000), NOT bank 3 as earlier drafts of this file claimed.
+ *   sdmode-gpios     = GPIO1_B5  — speaker amp enable (active high)
+ *   gainsel_1-gpios  = GPIO1_A3  — gain select bit (MSB)
+ *   gainsel_2-gpios  = GPIO1_A5  — gain select mid
+ *   gainsel_3-gpios  = GPIO1_A2  — gain select bit (LSB)
  *
  * Gain table (from disassembly jump table at 0xbda398-0xbda4d0):
  *   Vol 0: g1=0 g2=0 g3=0  (minimum, ~6 dB)

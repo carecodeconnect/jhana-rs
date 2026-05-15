@@ -27,10 +27,18 @@
 				// Speaker amp enable + 3-bit gain selector GPIOs.
 				// Without these the codec driver leaves the gain
 				// pins floating and DAC Playback Volume is a no-op.
-				sdmode-gpios    = <&gpio3 13 0>; /* GPIO3_B5 */
-				gainsel_1-gpios = <&gpio3  3 0>; /* GPIO3_A3 — MSB */
-				gainsel_2-gpios = <&gpio3  5 0>; /* GPIO3_A5 — mid */
-				gainsel_3-gpios = <&gpio3  2 0>; /* GPIO3_A2 — LSB */
+				//
+				// NOTE: these are on GPIO bank 1, NOT bank 3.
+				// docs/09_AUDIO.md and the snd-soc-uctronics-codec.c
+				// header used to say GPIO3 — that was a misread of
+				// the baseline DT (phandle 0x16a is gpio@fec20000 =
+				// GPIO1, not gpio@fec40000 = GPIO3). Two earlier
+				// boot hangs traced to the GPIO3 misassignment.
+				// See docs/TROUBLESHOOTING.md.
+				sdmode-gpios    = <&gpio1 13 0>; /* GPIO1_B5 */
+				gainsel_1-gpios = <&gpio1  3 0>; /* GPIO1_A3 — MSB */
+				gainsel_2-gpios = <&gpio1  5 0>; /* GPIO1_A5 — mid */
+				gainsel_3-gpios = <&gpio1  2 0>; /* GPIO1_A2 — LSB */
 
 				// Mid-range default: vol 2 ≈ +12 dB. Adjust at
 				// runtime with `amixer -c 1 cset numid=12 N`

@@ -1,14 +1,44 @@
 # 09: Uctronics Audio Codec Fix for Armbian
 
-## Status: MIC CAPTURE WORKING (2026-05-15)
+## Status: MIC CAPTURE + SPEAKER PLAYBACK WORKING (2026-05-15)
 
-The Uctronics onboard mic now captures real audio on Armbian with the
-uctronics-audio overlay and the reverse-engineered
-`snd-soc-uctronics-codec.ko` module. **Capture format must be S32_LE at
-48 kHz** — see "Mic capture format/rate" below.
+The Uctronics onboard mic captures real audio and the speaker plays
+back on Armbian via the `uctronics-audio` overlay and the
+reverse-engineered `snd-soc-uctronics-codec.ko` module.
 
-The earlier diagnosis ("TRCM clock gated to TX") was a red herring caused
-by reading the wrong bits of the I2S word; the clock is fine.
+- **Mic capture:** must be **S32_LE at 48 kHz** — see "Mic capture
+  format/rate" below.
+- **Speaker:** functional but **volume control via the codec's 3-bit
+  gainsel GPIOs is currently a no-op on this board.** The `sdmode`
+  GPIO works (we hear an amp click on probe and on each playback),
+  and the `DAC Playback Volume` mixer accepts values 0–4, but all
+  five values produced perceptually identical loudness in side-by-
+  side tests. Working theories:
+  1. The gainsel pins (claimed as `GPIO1_A2/A3/A5`) on this hardware
+     revision aren't actually wired to the amp's gain-selector inputs.
+  2. The amp's gain range across the 3-bit selector is too small
+     (~2–3 dB total) to be perceptible.
+  3. There is an additional digital/analog volume control in the
+     baseline chain (e.g. an I2S-TDM digital gain) that we have not
+     identified.
+
+  Until this is understood, **boost loudness in software** — e.g.
+  `ffmpeg -af "volume=10dB,alimiter=limit=0.95" …` on speech WAVs
+  before `aplay`. The `scripts/test-stt-tts.sh` start/stop cues need
+  this treatment to be clearly audible.
+
+- **GPIO bank correction (2026-05-15):** the overlay used `&gpio3`
+  for `sdmode-gpios` / `gainsel_*-gpios` for several iterations
+  before we noticed the baseline DT phandle `0x16a` is
+  `gpio@fec20000` = **GPIO bank 1**, not bank 3. With `&gpio3` the
+  codec driver was trying to claim pins in a bank where Armbian
+  pinmuxes them to other functions, which **hung systemd at boot
+  every time**. The fix is `&gpio1` (`GPIO1_B5` for sdmode and
+  `GPIO1_A2/A3/A5` for the three gainsel bits). See
+  `docs/TROUBLESHOOTING.md` for the full timeline.
+
+The earlier diagnosis ("TRCM clock gated to TX") was a red herring
+caused by reading the wrong bits of the I2S word; the clock is fine.
 
 ## Status: IN PROGRESS (2026-05-11)
 
@@ -110,12 +140,16 @@ From `hardware/uctronics-dsi/radxa-ubuntu-22.04-full.dts`:
 ```dts
 audio-codec-0 {
     compatible = "uctronics,uctronics-codec";
-    sdmode-gpios = <&gpio3 13 0>;     /* GPIO3_B5 — speaker amp enable */
-    gainsel_1-gpios = <&gpio3 3 0>;   /* GPIO3_A3 — gain select 1 */
-    gainsel_2-gpios = <&gpio3 5 0>;   /* GPIO3_A5 — gain select 2 */
-    gainsel_3-gpios = <&gpio3 2 0>;   /* GPIO3_A2 — gain select 3 */
+    sdmode-gpios = <&gpio1 13 0>;     /* GPIO1_B5 — speaker amp enable */
+    gainsel_1-gpios = <&gpio1 3 0>;   /* GPIO1_A3 — gain select 1 */
+    gainsel_2-gpios = <&gpio1 5 0>;   /* GPIO1_A5 — gain select 2 */
+    gainsel_3-gpios = <&gpio1 2 0>;   /* GPIO1_A2 — gain select 3 */
     #sound-dai-cells = <0>;
 };
+
+// NOTE: the GPIO pins above are on bank 1, not bank 3. Earlier
+// drafts of this document had &gpio3 — that was a misread of the
+// baseline DT (phandle 0x16a → gpio@fec20000 = GPIO1).
 
 uctronics-sound {
     status = "okay";
@@ -153,8 +187,8 @@ Missing: uctronics-codec (card 2 on old image)
 ## Hardware identification
 
 The `uctronics,uctronics-codec` driver has GPIO pins for:
-- `sdmode` (GPIO3_B5) — speaker amplifier enable (Class D shutdown pin)
-- `gainsel_1/2/3` (GPIO3_A3/A5/A2) — 3-bit gain selection
+- `sdmode` (GPIO1_B5) — speaker amplifier enable (Class D shutdown pin)
+- `gainsel_1/2/3` (GPIO1_A3/A5/A2) — 3-bit gain selection
 
 This is similar to a MAX98357A but with additional gain control GPIOs
 that standard MAX98357A does not have. The custom driver wraps both
