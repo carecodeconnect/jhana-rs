@@ -27,8 +27,22 @@ use sensevoice_rs::SenseVoiceSmall;
 use sensevoice_rs::silero_vad::VadConfig;
 
 /// ALSA capture device (Uctronics onboard mic).
-/// Card 0 on Armbian 26.2.1, was card 2 on old Radxa Ubuntu image.
-const CAPTURE_DEVICE: &str = "plughw:0,0";
+///
+/// With the uctronics-audio overlay loaded, the Uctronics codec lands on
+/// card 1 on Armbian (alongside es8316 on card 0 and the two HDMI cards).
+const CAPTURE_DEVICE: &str = "plughw:1,0";
+
+/// Capture format. **Must be S32_LE on this hardware.** The Uctronics I2S
+/// MEMS mic delivers ~24-bit samples in a 32-bit word; capturing as S16_LE
+/// reads the low/noise bits and yields DC-offset garbage even though
+/// `arecord` itself succeeds. See `docs/09_AUDIO.md` "Mic capture
+/// format/rate" for the analysis.
+const CAPTURE_FORMAT: &str = "S32_LE";
+
+/// Capture sample rate. The codec's I2S TDM controller is clocked for
+/// 48 kHz; lower rates rely on the ALSA plug layer to resample and
+/// produced poor results in testing.
+const CAPTURE_RATE: u32 = 48_000;
 
 /// Recording duration in seconds.
 const RECORD_SECONDS: u32 = 5;
@@ -139,9 +153,9 @@ fn listen_and_transcribe(svs: &SenseVoiceSmall, result_tx: &Sender<SttResult>) {
             "-D",
             CAPTURE_DEVICE,
             "-f",
-            "S16_LE",
+            CAPTURE_FORMAT,
             "-r",
-            "16000",
+            &CAPTURE_RATE.to_string(),
             "-c",
             "1",
             "-d",

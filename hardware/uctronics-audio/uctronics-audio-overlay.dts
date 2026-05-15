@@ -1,12 +1,14 @@
-// Device tree overlay for Uctronics AI in a Box audio codec
-// Enables onboard speaker (MAX98357A I2S amp) and mic (DMIC)
-// on the Rock 5A running Armbian 26.2.1 (kernel 6.1.115-vendor-rk35xx)
+// Device tree overlay for Uctronics AI in a Box audio codec.
 //
-// Hardware: MAX98357A Class D amp + digital MEMS mic on I2S2 bus
-// GPIO: sdmode=GPIO3_B5 (speaker amp enable, active high)
+// Hardware: custom Useful Sensors "uctronics-codec" — a class-D speaker amp
+// (sdmode + 3-bit gain GPIOs) and a MEMS I2S microphone wrapped into one
+// ALSA sound card via the rockchip,multicodecs-card framework.
 //
-// Based on device tree from Radxa Ubuntu 22.04 baseline image.
-// See docs/09_AUDIO.md for hardware analysis.
+// Pairs with the out-of-tree snd-soc-uctronics-codec.ko module
+// (see Makefile + snd-soc-uctronics-codec.c in this directory).
+//
+// Target kernel: Armbian 6.1.115-vendor-rk35xx on Rock 5A.
+// See docs/09_AUDIO.md for hardware analysis and reverse-engineering notes.
 
 /dts-v1/;
 /plugin/;
@@ -17,39 +19,55 @@
 	fragment@0 {
 		target-path = "/";
 		__overlay__ {
-			// MAX98357A I2S Class D amplifier (speaker)
-			max98357a: audio-codec-0 {
-				compatible = "maxim,max98357a";
-				sdmode-gpios = <&gpio3 13 0>;  /* GPIO3_B5 — speaker amp enable */
+			audio_codec_0: audio-codec-0 {
+				compatible = "uctronics,uctronics-codec";
+				sdmode-gpios    = <&gpio3 13 0>; /* GPIO3_B5 — amp enable */
+				gainsel_1-gpios = <&gpio3  3 0>; /* GPIO3_A3 — gain MSB */
+				gainsel_2-gpios = <&gpio3  5 0>; /* GPIO3_A5 — gain mid */
+				gainsel_3-gpios = <&gpio3  2 0>; /* GPIO3_A2 — gain LSB */
 				#sound-dai-cells = <0>;
 				status = "okay";
 			};
 
-			// Digital MEMS microphone
-			dmic: dmic-codec {
-				compatible = "dmic-codec";
-				#sound-dai-cells = <0>;
-				status = "okay";
-			};
-
-			// Sound card combining speaker + mic via I2S1_8CH (0xfe480000)
 			uctronics-sound {
 				compatible = "rockchip,multicodecs-card";
 				rockchip,card-name = "uctronics-codec";
 				rockchip,format = "i2s";
 				rockchip,mclk-fs = <256>;
 				rockchip,cpu = <&i2s1_8ch>;
-				rockchip,codec = <&max98357a>, <&dmic>;
+				rockchip,codec = <&audio_codec_0>;
 				status = "okay";
 			};
 		};
 	};
 
-	// Enable I2S1_8CH controller at 0xfe480000 (disabled by default in Armbian)
+	// Enable I2S1_8CH (disabled by default in Armbian) and fix its clock mode.
+	//
+	// Armbian's base DT sets rockchip,trcm-sync-tx-only — in that mode the
+	// shared TRCM clock only runs while TX (playback) is active, so a
+	// standalone arecord receives no bit-clock on SDI and the mic returns
+	// asymmetric DC-offset junk.
+	//
+	// The Useful Sensors baseline DT instead uses rockchip,clk-trcm = <1>
+	// (both directions clocked together). We replicate that here.
 	fragment@1 {
-		target-path = "/i2s@fe480000";
+		target = <&i2s1_8ch>;
 		__overlay__ {
 			status = "okay";
+			rockchip,playback-channels = <2>;
+			rockchip,capture-channels = <2>;
+
+			// rockchip,clk-trcm = <1> forces the TRCM-shared clock to be
+			// driven both directions. Without this, Armbian's base DT
+			// (which sets rockchip,trcm-sync-tx-only) only clocks RX while
+			// TX is active, so standalone arecord captures garbage.
+			//
+			// We do NOT /delete-property/ rockchip,trcm-sync-tx-only here:
+			// an earlier overlay variant that did so prevented boot on this
+			// board (u-boot fdt-apply or early kernel rejected it). The
+			// rk3588 i2s-tdm driver checks rockchip,clk-trcm first, so adding
+			// it should win even if the boolean property is still present.
+			rockchip,clk-trcm = <1>;
 		};
 	};
 };

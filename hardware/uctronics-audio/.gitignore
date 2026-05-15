@@ -1,0 +1,15 @@
+# Build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.dtbo
+Module.symvers
+modules.order
+.*.cmd
+.tmp_versions/
+
+# Baseline kernel extraction artifacts (binaries from Useful Sensors image,
+# large and reproducible from the upstream image — keep out of git).
+baseline/

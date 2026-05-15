@@ -1,23 +1,26 @@
-# Out-of-tree Makefile for MAX98357A and DMIC audio codec drivers
-# For Armbian kernel 6.1.115-vendor-rk35xx on Rock 5A (RK3588S)
+# Out-of-tree Makefile for the Uctronics AI in a Box audio codec.
 #
-# These modules are needed for the Uctronics AI in a Box onboard
-# speaker (MAX98357A I2S Class D amp) and mic (digital MEMS).
-# Armbian does not include these codecs in its kernel config.
+# Builds snd-soc-uctronics-codec.ko for Armbian kernel 6.1.115-vendor-rk35xx
+# on the Rock 5A (RK3588S). Pair with uctronics-audio-overlay.dts and the
+# device-tree fix for rockchip,trcm-sync-tx-only documented there.
+#
+# Build on the Rock (aarch64) — not on the dev machine.
 
 KERNEL_BUILD_DIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 
-obj-m += snd-soc-max98357a.o
-obj-m += snd-soc-dmic.o
-
-snd-soc-max98357a-objs := max98357a.o
-snd-soc-dmic-objs := dmic.o
+obj-m += snd-soc-uctronics-codec.o
 
 all:
 	$(MAKE) -C $(KERNEL_BUILD_DIR) M=$(PWD) modules
 
+dtbo: uctronics-audio.dtbo
+
+uctronics-audio.dtbo: uctronics-audio-overlay.dts
+	dtc -@ -I dts -O dtb -o $@ $<
+
 clean:
 	$(MAKE) -C $(KERNEL_BUILD_DIR) M=$(PWD) clean
+	rm -f uctronics-audio.dtbo
 
-.PHONY: all clean
+.PHONY: all clean dtbo

@@ -36,14 +36,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Record 5 seconds from mic
             let path = PathBuf::from("/tmp/test_stt.wav");
             println!("No WAV file provided — recording 5s from mic...");
+            // S32_LE @ 48 kHz on plughw:1,0 — see src/stt.rs and
+            // docs/09_AUDIO.md for why these are required on the
+            // Uctronics I2S mic.
             let status = Command::new("arecord")
                 .args([
                     "-D",
-                    "plughw:0,0",
+                    "plughw:1,0",
                     "-f",
-                    "S16_LE",
+                    "S32_LE",
                     "-r",
-                    "16000",
+                    "48000",
                     "-c",
                     "1",
                     "-d",

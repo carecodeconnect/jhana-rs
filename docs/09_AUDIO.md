@@ -1,5 +1,15 @@
 # 09: Uctronics Audio Codec Fix for Armbian
 
+## Status: MIC CAPTURE WORKING (2026-05-15)
+
+The Uctronics onboard mic now captures real audio on Armbian with the
+uctronics-audio overlay and the reverse-engineered
+`snd-soc-uctronics-codec.ko` module. **Capture format must be S32_LE at
+48 kHz** — see "Mic capture format/rate" below.
+
+The earlier diagnosis ("TRCM clock gated to TX") was a red herring caused
+by reading the wrong bits of the I2S word; the clock is fine.
+
 ## Status: IN PROGRESS (2026-05-11)
 
 The Uctronics AI in a Box onboard microphone and speaker do not work on
@@ -212,6 +222,55 @@ Source files still in `hardware/uctronics-audio/` for reference.
 Enable the Uctronics codec in the Armbian kernel config and rebuild.
 Most reliable but requires full kernel build infrastructure and the
 Uctronics driver source (which is proprietary).
+
+## Mic capture format/rate
+
+The Uctronics MEMS mic feeds the RK3588 I2S1_8CH (`rockchip-i2s-tdm`)
+controller. Captured frames arrive as 24-bit samples in 32-bit words.
+Capturing with `arecord -f S16_LE` reads the low half of the word, which
+contains only noise / dither / a small DC bias — producing recordings
+that look like garbage even though the codec is correctly registered.
+
+**Use S32_LE at 48 kHz:**
+
+```bash
+arecord -D plughw:1,0 -f S32_LE -r 48000 -c 1 -d 5 mic.wav
+```
+
+Verified 2026-05-15: standalone capture (no concurrent playback) shows
+clean signal in the high bits; a mic tap registers a peak of ~3.6×10^8
+out of 2^31 (~17 % full-scale) and is clearly visible in 0.5 s window
+RMS readings. With S16_LE on the same setup the tap was indistinguishable
+from noise.
+
+`plughw:` doesn't rescue the situation if you ask it for S16_LE 16 kHz —
+the conversion is done on already-truncated samples. Capture at S32_LE
+48 kHz natively, then resample / down-quantize in user code (e.g. via
+SenseVoice's internal resampler, or `ffmpeg -i in.wav -ar 16000 -sample_fmt s16 out.wav`).
+
+`src/stt.rs` is configured for `plughw:1,0`, S32_LE, 48 kHz.
+
+## DO NOT touch `rockchip,clk-trcm` from an overlay (2026-05-15)
+
+Two attempts to override the i2s@fe480000 clock-mode property via the
+audio overlay broke boot:
+
+1. Adding `rockchip,clk-trcm = <1>` *and* `/delete-property/ rockchip,trcm-sync-tx-only`
+   → kernel boots far enough to print TTY output, systemd never reaches
+   getty, no networking, no Tailscale.
+2. Adding only `rockchip,clk-trcm = <1>` (no delete-property) → same
+   failure mode.
+
+Recovery in both cases required pulling the microSD on the dev machine
+and removing `uctronics-audio` from `overlays=` in
+`/boot/armbianEnv.txt`. The original overlay (with neither property)
+boots cleanly and captures audio correctly once S32_LE is used.
+
+The 6.1.115-vendor-rk35xx `rockchip-i2s-tdm` driver apparently expects
+something additional (specific clocks/regulators?) when `clk-trcm=1` that
+the Useful Sensors 5.10 baseline DT provides but our overlay doesn't.
+Not worth chasing now since S32_LE makes the mic work without changing
+the clock mode.
 
 ## Known issues
 

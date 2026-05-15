@@ -366,28 +366,51 @@ workloads.
       init sequence (200 DCS commands) extracted from baseline image kernel
       via disassembly. Installed as `panel-radxa-display-8hd.ko` replacement.
       Uses stock `rock-5a-radxa-display-8hd` overlay unchanged.
-- [ ] **Fix Uctronics audio codec on Armbian** (in progress 2026-05-11)
+- [x] **Fix Uctronics audio codec on Armbian** (2026-05-15)
       Onboard mic+speaker use a custom Uctronics codec (NOT standard MAX98357A).
-      The `uctronics,uctronics-codec` driver is proprietary, baked into the
-      Useful Sensors baseline image kernel. Must extract and rebuild — same
-      approach that worked for the display driver.
+      The `uctronics,uctronics-codec` driver was reverse-engineered from the
+      Useful Sensors baseline image kernel and rewritten as a loadable .ko
+      module against Armbian 6.1.115-vendor-rk35xx.
       - [x] Build standard MAX98357A + DMIC modules (2026-05-11) — ABANDONED,
             hardware is not standard MAX98357A (has extra gain GPIOs)
       - [x] DT overlay attempt broke networking — reverted (2026-05-11)
       - [x] Documented original AI in a Box audio setup from GitHub repo
-      - [ ] Download baseline image (`ai_in_a_box_baseline_16gb_20240125.img.gz`)
-            to X61s (2.4 GB, essential for reverse engineering — also used for
-            display driver extraction). May already be downloaded.
-      - [ ] Mount baseline image, extract vmlinuz + System.map
-      - [ ] Find `uctronics_codec` symbols in System.map
-      - [ ] Disassemble codec driver on Rock (native `objdump`, same as display)
-      - [ ] Rewrite as loadable .ko module for kernel 6.1.115-vendor-rk35xx
-      - [ ] Create DT overlay (audio-codec-0 + uctronics-sound + enable I2S1_8CH)
-      - [ ] Install module + overlay, verify ALSA card appears
-      - [ ] Test speaker playback and mic capture
-      - [ ] Respect audio input→output ordering (see `docs/09_AUDIO.md`)
-      - [ ] Update `src/stt.rs` and `src/tts.rs` ALSA device constants
+      - [x] Baseline image (`ai_in_a_box_baseline_16gb_20240125.img.gz`)
+            extracted; vmlinuz + System.map on the Rock under `~/baseline-kernel/`.
+      - [x] `uctronics_codec` / `uc_codec_*` symbols located in System.map;
+            disassembled from `vmlinuz-102` (P53 cross-objdump).
+      - [x] `snd-soc-uctronics-codec.ko` written for 6.1.115-vendor-rk35xx
+            (`hardware/uctronics-audio/snd-soc-uctronics-codec.c`).
+      - [x] DT overlay `uctronics-audio` enables i2s1_8ch + binds codec.
+      - [x] Module + overlay installed; ALSA card 1 = `uctronics-codec` appears.
+      - [x] Mic capture works at **S32_LE 48 kHz** (S16_LE reads garbage —
+            see `docs/09_AUDIO.md` "Mic capture format/rate"). SenseVoice
+            transcribes correctly end-to-end via `scripts/test-stt-tts.sh`.
+      - [x] Speaker plays back tones — `aplay -D plughw:1,0`.
+      - [x] `src/stt.rs` and `src/bin/test_stt.rs` updated for plughw:1,0 / S32_LE / 48 kHz.
+      - [ ] **Add `sdmode-gpios` + `gainsel_{1,2,3}-gpios` to the overlay's
+            `audio-codec-0` node** so the codec driver can drive the speaker
+            amp enable and 3-bit gain selector (it currently logs `sdmode=no
+            gain=3`). Without these the DAC Playback Volume mixer is a no-op
+            and the speaker level is fixed at hardware default. **Risk:**
+            two earlier overlay iterations broke boot when touching the
+            i2s@fe480000 fragment; only audio-codec-0 changes should be safe.
+            Test carefully.
+      - [ ] Respect audio input→output ordering (see `docs/09_AUDIO.md`):
+            recorder opens mic input first, then TTS opens output.
       See `docs/09_AUDIO.md` for full analysis and references.
+
+- [ ] **Reinstall Piper TTS — broken on Armbian (2026-05-15).**
+      `libpiper_phonemize.so.1` references `espeak_TextToPhonemesWithTerminator`
+      which is not exported by the installed espeak-ng. Symptoms:
+      `aplay`-able WAVs never get produced; the Piper process dies with
+      `symbol lookup error`. Additionally the bundled ONNX runtime rejects
+      the current `en_US-lessac-medium.onnx` (IR v9, max supported v8 — a
+      hex-patch of the IR byte gets past load, but then hits the
+      libpiper_phonemize crash). Action: rebuild or reinstall a matching
+      piper + piper_phonemize + espeak-ng triple, or move to
+      `piper-rknn-rs` directly. `scripts/test-stt-tts.sh` skips playback
+      cleanly when this happens.
 - [x] **Get TUI running on Armbian image** (2026-05-08)
       Rust toolchain installed, jhana-rs built, TUI running on DSI display.
       Piper TTS installed (`/usr/local/bin/piper` + espeak-ng-data symlink).
