@@ -24,6 +24,7 @@
 //! into sentences and pause durations.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
 use log::{error, info, warn};
@@ -173,6 +174,13 @@ pub fn list_meditations() -> Vec<String> {
     types
 }
 
+/// Set to `true` once the RKLLM model has finished loading via
+/// [`preload`]. The TUI's main loop pairs this with
+/// [`crate::stt::STT_READY`] to gate the welcome speech: greeting
+/// while loads are still in flight means the user can press
+/// ENTER and then sit staring at a frozen screen.
+pub static LLM_READY: AtomicBool = AtomicBool::new(false);
+
 /// Pre-load the RKLLM model in a background thread so the first
 /// `start_streaming` call doesn't pay the ~37–74 s NPU init cost.
 ///
@@ -185,7 +193,10 @@ pub fn preload() {
     std::thread::Builder::new()
         .name("llm-preload".into())
         .spawn(|| match get_or_load_model() {
-            Ok(_) => info!("RKLLM preload complete"),
+            Ok(_) => {
+                info!("RKLLM preload complete");
+                LLM_READY.store(true, Ordering::Release);
+            }
             Err(e) => error!("RKLLM preload failed: {e}"),
         })
         .expect("failed to spawn llm-preload thread");

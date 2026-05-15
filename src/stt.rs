@@ -19,6 +19,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
@@ -82,6 +83,15 @@ pub enum SttResult {
 /// Returns a `Sender<SttCommand>` for triggering recording, and the
 /// results come back on `result_tx` which should be polled in the
 /// main event loop.
+/// Set to `true` once SenseVoice has finished loading. The TUI's
+/// main loop watches this together with [`crate::llm::LLM_READY`]
+/// to decide when to play the welcome speech — speaking before the
+/// models are ready means the user can press ENTER and then sit
+/// staring at a frozen screen for tens of seconds while loads
+/// finish, so we hold the greeting until the device is actually
+/// ready to respond.
+pub static STT_READY: AtomicBool = AtomicBool::new(false);
+
 pub fn start(result_tx: Sender<SttResult>) -> Sender<SttCommand> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SttCommand>();
 
@@ -125,6 +135,7 @@ fn stt_loop(cmd_rx: &Receiver<SttCommand>, result_tx: &Sender<SttResult>) {
         "SenseVoice model loaded in {:.2}s",
         load_start.elapsed().as_secs_f32()
     );
+    STT_READY.store(true, Ordering::Release);
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
@@ -147,6 +158,12 @@ fn stt_loop(cmd_rx: &Receiver<SttCommand>, result_tx: &Sender<SttResult>) {
 fn listen_and_transcribe(svs: &SenseVoiceSmall, result_tx: &Sender<SttResult>) {
     // Signal that we're recording
     let _ = result_tx.send(SttResult::Recording);
+
+    // Audible "Speak now" cue — without this the user has to guess
+    // exactly when the 5-second mic window opens.
+    let _ = Command::new("espeak-ng")
+        .args(["-a", "100", "-s", "145", "Speak now."])
+        .status();
 
     // Record from mic via arecord
     let wav_path = PathBuf::from(RECORD_PATH);

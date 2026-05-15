@@ -94,12 +94,36 @@ fn main() -> io::Result<()> {
     info!("terminal initialized, entering event loop");
 
     let mut app = App::new();
+    app.push_sentence("Loading models...".to_string());
 
-    // Welcome the user: render greeting in the TUI and speak it via TTS so
-    // the device tells them what to do even if they can't read the screen.
-    for line in WELCOME_LINES {
-        app.push_sentence((*line).to_string());
-        let _ = tts_tx.send(tts::TtsCommand::Speak((*line).to_string()));
+    // Welcome the user once both models have finished loading. Speaking
+    // while loads are still in flight means the user can press ENTER
+    // and then sit staring at a frozen screen for tens of seconds.
+    // Spawn a tiny thread that waits for the two ready flags, then
+    // queues the welcome lines to the TTS thread (which the main loop
+    // sees as it polls). We don't gate the TUI render on this — the
+    // screen still updates.
+    {
+        use std::sync::atomic::Ordering;
+        let tts_tx_for_welcome = tts_tx.clone();
+        std::thread::Builder::new()
+            .name("welcome".into())
+            .spawn(move || {
+                loop {
+                    let stt_ready = stt::STT_READY.load(Ordering::Acquire);
+                    let llm_ready = llm::LLM_READY.load(Ordering::Acquire);
+                    if stt_ready && llm_ready {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                info!("models loaded — playing welcome");
+                for line in WELCOME_LINES {
+                    let _ = tts_tx_for_welcome
+                        .send(tts::TtsCommand::Speak((*line).to_string()));
+                }
+            })
+            .expect("failed to spawn welcome thread");
     }
 
     // Main event loop

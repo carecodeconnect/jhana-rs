@@ -46,6 +46,36 @@ until the agent + skills runtime is built. None of the changes break
 the offline-by-default rule: all literature, templates, and tools
 must live on the device's storage.
 
+### Existing Rust voice-agent frameworks (discovered 2026-05-15)
+
+After web search for our use-case shape (offline Rust voice agent
+with STT + LLM + TTS on embedded Linux), three existing projects
+turn out to overlap heavily with what we'd otherwise hand-build:
+
+| Project | Stack | Pipeline | Fit for jhana-rs |
+|---------|-------|----------|------------------|
+| **[Vox](https://github.com/mrtozner/vox)** | Pure Rust | Mic → Silero VAD → Whisper/Sherpa STT → speaker ID → user code → Kokoro/Piper/Qwen3 TTS → speaker | **Closest direct match.** Pipeline shape is exactly our target. Pluggable STT/TTS backends. Worth reading even if we don't adopt — the trait surface is a model for our own. |
+| **[Feros](https://dev.to/loopbreaker111/we-open-sourced-our-production-voice-ai-stack-rust-runtime-sub-second-latency-3gb9)** | Rust + Tokio | VAD → STT → LLM → TTS, hot path entirely Rust, sub-second latency target | "Voice Agent OS"; orchestration is in Rust on `tokio`. The async-streaming architecture we sketched above is essentially their production stack. |
+| **[EchoKit](https://github.com/second-state/echokit_box)** | Rust + ESP32 | VAD, ASR, LLM orchestration, TTS for embedded MCUs | Targets ESP32 not RK3588, but the ergonomics of "voice toolkit for a tiny embedded device" overlap with our cyberbox aesthetic. |
+| **[Kalosm](https://github.com/floneum/floneum)** (kalosm-0.4, Feb 2025) | Rust + Candle | LLM + Whisper STT + async streaming; **no built-in TTS, no clear tool-call story** | Less direct fit; more of a "local-first ML primitives" library than an agent framework. Useful for understanding how `Candle`-based async streaming is shaped, but doesn't replace our pipeline. |
+| **[Goose](https://github.com/block/goose)** (Block / Square) | Rust + TypeScript | Agent + tool-calling via Model Context Protocol (MCP); 15+ LLM providers incl. **Ollama** for local | Production AI agent with desktop apps. If we want a generic agent that speaks MCP we plug rkllm-rs behind an Ollama-compatible endpoint and reuse Goose's 70+ MCP extensions. Heavier than what we need, but the MCP-as-tool-protocol pattern is portable. |
+
+Implication for the architecture:
+
+- We do **not** need to handroll the agent runtime if we don't want
+  to — **Vox or Feros could be the spine**, with `rkllm-rs` plugged
+  in as the LLM provider and `sensevoice-rs` + `espeak-ng` →
+  `piper-rs` as the STT/TTS implementations. That gets us a
+  tokio-async pipeline for ~free.
+- If we still want a Pi-style higher-level agent on top
+  (tool calls, meditation-template retrieval, repair sequences from
+  NCF), Goose-via-MCP is a single-binary alternative to a separate
+  Node `pi-mono` install.
+- A **bespoke ratatui + tokio** build (option in this section's
+  header) remains viable too — Vox's traits are a good crib sheet
+  for what to expose, and we already have ratatui + rkllm-rs +
+  sensevoice-rs working.
+
 ### Candidate agent harnesses
 
 The choice of harness drives whether we can stay in a single Rust

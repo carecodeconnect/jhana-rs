@@ -306,7 +306,6 @@ pub fn render(frame: &mut Frame, app: &App) {
     // Body — meditation text with styled pause markers (sentence reveal)
     let text_lines: Vec<Line> = app
         .visible_lines()
-        .iter()
         .map(|s| {
             if s.starts_with("[pause") || s.starts_with('[') && s.ends_with(']') {
                 let inner = s.trim_start_matches('[').trim_end_matches(']');
