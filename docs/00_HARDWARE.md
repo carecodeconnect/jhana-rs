@@ -1,6 +1,33 @@
 # 00: Hardware — Radxa Rock 5A (Uctronics AI in a Box)
 
-Evidence gathered directly from the running device on 2026-05-08.
+Evidence gathered directly from the running device on 2026-05-08;
+running notes appended as additional evidence is collected.
+
+## Quick reference (2026-05-15 working state)
+
+| Subsystem        | Value / setting                                              |
+|------------------|--------------------------------------------------------------|
+| OS               | Armbian, kernel `6.1.115-vendor-rk35xx` (current)            |
+| RAM              | 8 GB total (7.8 GiB usable)                                  |
+| Storage          | microSD only — no eMMC populated                             |
+| LLM runtime      | RKNPU driver **v0.9.8** builtin (OK for RKLLM); `librkllmrt.so` v1.2.3 |
+| LLM model        | `~/models/Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm` (4.35 GB) |
+| STT runtime      | RKNN v2.2.0 via sensevoice-rs (Rust); model in `~/models/sensevoice/` |
+| TTS runtime      | espeak-ng baseline (Piper broken on Armbian — see TROUBLESHOOTING.md) |
+| Display          | 720×1280 portrait DSI via the Uctronics panel (works)        |
+| Audio in / out   | Uctronics codec on ALSA card 1, S32_LE 48 kHz native capture |
+| GPIO buttons     | Up=63, Down=43, Enter=139, Back=138 (wired in `src/gpio.rs`) |
+| Network          | Tailscale (rock-5a, 100.103.3.6); LAN ethernet               |
+| Critical kernel cmdline | `cma=4096M fbcon=rotate:1` — CMA bumped 2026-05-15 from 256M because RKLLM's 3 GB DMA mapping needs the headroom. See [06_KERNEL.md](06_KERNEL.md). |
+| Service          | `jhana-rs.service` (systemd) for boot autostart              |
+
+The whole hardware-vs-software story is split across docs:
+
+- This file — physical board facts, what's measured.
+- [06_KERNEL.md](06_KERNEL.md) — NPU driver and RKLLM init issues.
+- [08_DISPLAY.md](08_DISPLAY.md) — DSI panel + Uctronics LCD driver.
+- [09_AUDIO.md](09_AUDIO.md) — codec + microphone + speaker pipeline.
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — known-bad overlay variants and recovery procedures.
 
 ## Board
 

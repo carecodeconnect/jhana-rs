@@ -1,15 +1,59 @@
-# 06: RKNPU Kernel Driver Upgrade
+# 06: RKNPU Kernel Driver
 
-## Current state (2026-05-08)
+## Current state (2026-05-15, updated)
+
+The driver-version concern that motivated this document is now
+resolved on the Armbian image we're running:
 
 | Component | Version | Status |
 |-----------|---------|--------|
-| Kernel | 5.10.110-102-rockchip | Radxa vendor BSP (2022) |
-| RKNPU driver | v0.8.2 (builtin) | **Too old for RKLLM** |
+| Kernel | 6.1.115-vendor-rk35xx | Armbian vendor (current) |
+| RKNPU driver | **v0.9.8** (builtin) | **OK for RKLLM** — verified via `modinfo rknpu` |
 | librknnrt.so | v2.2.0 | OK for STT/VAD (RKNN) |
-| librkllmrt.so | v1.2.3 | Installed, but driver too old |
+| librkllmrt.so | v1.2.3 | OK |
 
-## Why the driver must be upgraded
+Verified live: `modinfo rknpu` shows `version: 0.9.8`, and
+`cat /sys/kernel/debug/rknpu/version` confirms `RKNPU driver: v0.9.8`.
+
+### Open RKLLM issue today (2026-05-15)
+
+`rkllm_init` returns `-1` when loading the 3 B Llama model
+(`~/models/Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm`, 4.35 GB).
+Kernel reports:
+
+```
+RKNPU: failed to allocate IOVA: -12
+RKNPU fdab0000.npu: RKNPU: rknpu_gem_get_pages: dma map 3212574720 fail
+```
+
+`-12` is ENOMEM from the IOVA allocator — a single ~3 GB IOVA
+mapping can't be satisfied. **Not a driver version issue**; suspects:
+
+- CMA region too small (default Armbian: `cma=256M` in
+  `/boot/armbianEnv.txt` extraargs).
+- Memory fragmentation by the time RKLLM tries to load (TUI + audio
+  pipeline already ran).
+- IOVA address-space exhaustion on the SMMU/IOMMU.
+
+Diagnostic script: `scripts/rock-test-rkllm.sh` — kills the TUI,
+drops page cache, runs memory compaction, prints CMA / IOMMU /
+driver state, attempts `test_rkllm`, and tails dmesg for the
+RKNPU error.
+
+Working theories to test (in order of effort):
+
+1. **Load RKLLM first thing after boot**, before TUI/STT touch
+   memory. Confirms fragmentation as the root cause.
+2. **Bump `cma=4096M` in `/boot/armbianEnv.txt`** (SD-card edit,
+   reboot). Biggest single lever if CMA is the bottleneck.
+3. **Try a smaller model** (Llama-3.2-1B at ~1 GB) — isolates
+   whether the issue is allocation-size or pipeline-state.
+
+The legacy 5.10 / 0.8.2 driver-upgrade notes below remain for
+historical reference in case the project ever needs to support that
+kernel again.
+
+## Legacy: why the 0.8.2 driver needed an upgrade (5.10 only)
 
 The RKNPU kernel driver v0.8.2 (baked into kernel 5.10.110) cannot run
 RKLLM inference. Tested 2026-05-08:
