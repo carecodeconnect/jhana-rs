@@ -25,36 +25,38 @@ PIPER=/usr/local/bin/piper
 PIPER_MODEL=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium-ir8.onnx
 PIPER_CONFIG=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx.json
 
-echo "==> Generating start/stop beeps with ffmpeg..."
+echo "==> Generating spoken cues + chime via espeak-ng + ffmpeg..."
 # The onboard Uctronics speaker has a physical loudness ceiling that the
-# 3-bit codec gain selector barely budges. The original AI in a Box gets
-# its perceived loudness from PulseAudio (`pactl set-sink-volume 0xFFFF`)
-# which combines software gain + soft-clipping. We approximate that here
-# with `volume=20dB,alimiter` — the limiter compresses peaks so the
-# average power rises even though the peak is already at 0 dBFS, which
-# the small speaker hears as "louder". Sounds best around 1–2 kHz (the
-# speaker's response peak); 440 Hz comes through much quieter.
+# 3-bit codec gain selector barely budges (the original AI in a Box
+# relied on PulseAudio software gain that we don't have in raw aplay).
+# We approximate it with `volume=20dB,alimiter` so peaks compress instead
+# of clip hard — the small speaker reads that as "louder". The speaker
+# is also heavily peaked around 1–2 kHz, so cues should be spoken or
+# tuned to that band.
 LOUD='volume=20dB,alimiter=limit=0.95'
 
-# "Start": 1500 Hz, 0.4 s — short and high so it's hard to miss.
-ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=1500:duration=0.4" \
-  -af "$LOUD" -ar 48000 -ac 1 -sample_fmt s16 "$BEEP_START"
-# "Stop": 700 Hz, 0.6 s — lower so it's distinguishable from start.
-ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=700:duration=0.6" \
-  -af "$LOUD" -ar 48000 -ac 1 -sample_fmt s16 "$BEEP_STOP"
+# Spoken cue ("Speak now") via espeak-ng so the user hears it from the
+# Rock itself, not just on the dev-machine stdout. Same for "Stop".
+# Resample to the codec's native 48 kHz and pump through the limiter.
+gen_speech() {
+  local text="$1" out="$2" tmp="${out}.raw.wav"
+  espeak-ng -a 200 -s 150 -w "$tmp" "$text" >/dev/null 2>&1
+  ffmpeg -y -hide_banner -loglevel error \
+    -i "$tmp" -af "$LOUD" -ar 48000 -ac 1 -sample_fmt s16 "$out"
+  rm -f "$tmp"
+}
+gen_speech "Speak now." "$BEEP_START"
+gen_speech "Stop."      "$BEEP_STOP"
 
 echo
-echo "Get ready — beep coming in 2 seconds..."
+echo "Get ready — cue coming in 2 seconds..."
 sleep 2
+# Play "Speak now" through the speaker so the user hears the cue.
 aplay -q -D "$SPK" "$BEEP_START" 2>/dev/null
-sleep 0.4  # let speaker amp pop decay before sampling
-echo
-echo "*** SPEAK NOW — 5 seconds — clear loud sentence ***"
+sleep 0.3  # let speaker amp pop decay before sampling
 arecord -D "$MIC" -f S32_LE -r 48000 -c 1 -d 5 "$WAV_IN_NATIVE" 2>&1 | tail -1
+# "Stop" cue — also lets the user know recording ended.
 aplay -q -D "$SPK" "$BEEP_STOP" 2>/dev/null
-echo "*** Recording finished ***"
 
 echo
 echo "==> Resampling to S16_LE 16 kHz mono for SenseVoice..."
