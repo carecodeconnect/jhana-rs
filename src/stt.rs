@@ -27,11 +27,12 @@ use log::{error, info};
 use sensevoice_rs::SenseVoiceSmall;
 use sensevoice_rs::silero_vad::VadConfig;
 
-/// ALSA capture device (Uctronics onboard mic).
-///
-/// With the uctronics-audio overlay loaded, the Uctronics codec lands on
-/// card 1 on Armbian (alongside es8316 on card 0 and the two HDMI cards).
-const CAPTURE_DEVICE: &str = "plughw:1,0";
+/// Capture via the ALSA→PulseAudio plugin. PA owns the Uctronics card
+/// in system mode (see docs/09_AUDIO.md), so `plughw:1,0` returns
+/// "Device or resource busy". `pulse` routes through PA's default
+/// source, which our /etc/pulse/system.pa points at
+/// alsa_input.platform-uctronics-sound.stereo-fallback.
+const CAPTURE_DEVICE: &str = "pulse";
 
 /// Capture format. **Must be S32_LE on this hardware.** The Uctronics I2S
 /// MEMS mic delivers ~24-bit samples in a 32-bit word; capturing as S16_LE
