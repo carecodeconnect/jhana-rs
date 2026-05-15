@@ -173,10 +173,30 @@ pub fn list_meditations() -> Vec<String> {
     types
 }
 
+/// Pre-load the RKLLM model in a background thread so the first
+/// `start_streaming` call doesn't pay the ~37–74 s NPU init cost.
+///
+/// Call this once from `main()` shortly after the TUI starts. Any
+/// later `start_streaming` will reuse the cached handle. The load
+/// log line ("RKLLM model loaded") will appear in `jhana-rs.log`
+/// when warmup completes. If this fails, the error is logged but
+/// the function returns — the next `start_streaming` will retry.
+pub fn preload() {
+    std::thread::Builder::new()
+        .name("llm-preload".into())
+        .spawn(|| match get_or_load_model() {
+            Ok(_) => info!("RKLLM preload complete"),
+            Err(e) => error!("RKLLM preload failed: {e}"),
+        })
+        .expect("failed to spawn llm-preload thread");
+}
+
 /// Ensure the RKLLM model is loaded, returning a reference to the handle.
 ///
-/// First call loads the model (~130s for 3B). Subsequent calls return
-/// the cached handle instantly.
+/// First call loads the model (~37–74 s for 3 B on the RK3588 NPU,
+/// depending on whether page cache is warm). Subsequent calls return
+/// the cached handle instantly. Call [`preload`] at startup to move
+/// this cost off the first-button-press hot path.
 fn get_or_load_model() -> Result<&'static LLMHandle, String> {
     if let Some(handle) = MODEL.get() {
         return Ok(handle);
@@ -189,6 +209,11 @@ fn get_or_load_model() -> Result<&'static LLMHandle, String> {
 
     let mut config = LLMConfig::with_model_path(&model_path);
     config.max_new_tokens = MAX_TOKENS;
+    // Shrink the KV cache from the model's baked-in 4096 to 1024 to
+    // save ~hundreds of MB of RAM. Meditation prompts are short
+    // (system prompt + one user sentence ≈ 300 tokens) so 1024 is
+    // ample headroom. See docs/11_BENCHMARKS.md "RAM efficiency".
+    config.max_context_len = 1024;
     config.temperature = 0.7;
     config.top_p = 0.9;
     config.top_k = 40;

@@ -73,6 +73,12 @@ fn main() -> io::Result<()> {
     // TTS background thread — receives sentences to speak aloud
     let tts_tx = tts::start();
 
+    // Pre-load the RKLLM model in the background so first ENTER press
+    // doesn't pay the 37–74 s NPU init. Welcome speech + STT cold load
+    // run in parallel with this; by the time the user actually speaks
+    // and SenseVoice transcribes, the LLM should be ready.
+    llm::preload();
+
     // Signal handling — SIGTERM/SIGINT set this flag to quit the event loop
     let quit = Arc::new(AtomicBool::new(false));
     let quit_signal = Arc::clone(&quit);

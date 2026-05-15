@@ -28,6 +28,7 @@
 //! └─────────────────────────────────┘
 //! ```
 
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use ratatui::{
@@ -122,14 +123,23 @@ impl std::fmt::Display for AppState {
 
 /// Application state displayed in the TUI.
 ///
+/// Maximum number of text lines retained in memory. Older lines are
+/// dropped from the front of the deque so a long-running session does
+/// not grow unbounded — see docs/11_BENCHMARKS.md "RAM efficiency".
+const MAX_LINES: usize = 200;
+
 /// Holds the meditation text, scroll position, generation stats, and
 /// lifecycle state. Scroll offset exists because the Rock's 720x1280
 /// display at 32px font height gives only ~34 visible body rows —
 /// longer meditations need scrolling.
 pub struct App {
     /// All generated lines (the full meditation text so far).
-    /// New lines are appended as the LLM streams them.
-    all_lines: Vec<String>,
+    /// New lines are appended as the LLM streams them; once the buffer
+    /// reaches `MAX_LINES` the oldest lines are dropped from the front
+    /// to keep peak RSS bounded. `Box<str>` is used (rather than
+    /// `String`) because completed lines never grow and `Box<str>`
+    /// drops the unused capacity word.
+    all_lines: VecDeque<Box<str>>,
     /// Number of lines currently visible. During generation, this
     /// increases one sentence at a time for a reveal effect.
     /// When idle/done, equals `all_lines.len()`.
@@ -152,7 +162,7 @@ impl App {
     /// Create a new [`App`] in [`AppState::Idle`] with the light theme (outdoor).
     pub fn new() -> Self {
         Self {
-            all_lines: Vec::new(),
+            all_lines: VecDeque::with_capacity(MAX_LINES),
             visible_count: 0,
             state: AppState::Idle,
             scroll: 0,
@@ -164,9 +174,9 @@ impl App {
     }
 
     /// Lines currently visible in the TUI (for sentence-by-sentence reveal).
-    pub fn visible_lines(&self) -> &[String] {
+    pub fn visible_lines(&self) -> impl Iterator<Item = &str> {
         let end = self.visible_count.min(self.all_lines.len());
-        &self.all_lines[..end]
+        self.all_lines.iter().take(end).map(|s| s.as_ref())
     }
 
     /// Push a new sentence and make it visible immediately.
@@ -174,14 +184,18 @@ impl App {
     /// Called when the LLM emits a complete sentence. The sentence appears
     /// at the bottom of the text area. Auto-scrolls to keep the latest text
     /// in view, even if the user previously scrolled up — the meditation
-    /// text should always follow the live generation.
+    /// text should always follow the live generation. Drops the oldest
+    /// pair of lines when the deque exceeds `MAX_LINES` to bound RAM.
     #[expect(clippy::cast_possible_truncation)] // line counts are small
     pub fn push_sentence(&mut self, sentence: String) {
-        self.all_lines.push(sentence);
+        self.all_lines.push_back(sentence.into_boxed_str());
         // Add a blank line after each sentence/pause for vertical spacing.
         // This makes the text more spacious and meditative, and naturally
         // limits the visible content to ~5-8 items on the 40-row display.
-        self.all_lines.push(String::new());
+        self.all_lines.push_back(Box::from(""));
+        while self.all_lines.len() > MAX_LINES {
+            self.all_lines.pop_front();
+        }
         self.visible_count = self.all_lines.len();
         // Auto-scroll: keep the bottom of the text visible.
         if self.visible_count > 5 {

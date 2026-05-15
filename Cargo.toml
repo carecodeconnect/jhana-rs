@@ -22,3 +22,15 @@ unsafe_code = "warn"
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# Size-optimised release profile. The binary sits resident in RAM the
+# whole time the cyberbox is on, so trimming code size is a direct
+# RAM win in addition to faster cold start. Compile time is longer
+# (single codegen unit + fat LTO) but the Rock is bandwidth-bound,
+# not throughput-bound, so size > speed at the margin.
+[profile.release]
+opt-level = "z"     # optimise for binary size, not speed
+lto = "fat"         # whole-program optimisation
+codegen-units = 1   # let LLVM see everything for inlining/dead-code elim
+strip = "symbols"   # drop debug symbols from the final binary
+panic = "abort"     # no unwind tables; we don't catch_unwind anywhere

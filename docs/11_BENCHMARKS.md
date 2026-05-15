@@ -7,6 +7,28 @@ Numbers are consolidated from earlier benchmarking embedded in
 `03_TTS.md`, `05_NPU.md`, and `06_KERNEL.md`. New runs should be
 appended here, not back into those docs.
 
+## RAM efficiency (Rust-side levers)
+
+The Rock 5A has unified 8 GB DRAM shared by CPU + NPU + GPU + VPU.
+Every MB the userland keeps live is a MB the LLM doesn't get. Rust
+patterns that help here, in order of payoff:
+
+| Lever                                                                  | Where in jhana-rs                            | Status (2026-05-15) | Saving                          |
+|------------------------------------------------------------------------|----------------------------------------------|---------------------|---------------------------------|
+| **Cap `App.all_lines` as `VecDeque<Box<str>>`**                        | `src/ui.rs`                                  | **landed**          | Bounded growth (was unbounded `Vec<String>`); ~1–50 MB over long sessions; also drops `String`'s capacity word per finished line. |
+| **Set `max_context_len = 1024` on RKLLM**                              | `src/llm.rs::get_or_load_model`              | **landed**          | KV cache stops growing past 1024 tokens (model baked-in is 4096) — hundreds of MB freed depending on quant + layer count. |
+| **Size-optimised `[profile.release]`** (`opt-level = "z"`, fat LTO, 1 codegen unit, strip, `panic = "abort"`) | `Cargo.toml`                                 | **landed**          | Smaller resident binary text; faster cold start. |
+| **`mpsc::sync_channel(N)`** instead of unbounded `channel`             | `src/main.rs`, `src/tts.rs`, `src/stt.rs`    | TODO                | Bounds peak channel-buffer RAM; backpressures LLM if TTS lags. |
+| **`Arc<str>` shared sentence** between TUI + TTS + log                 | `src/main.rs` per-sentence dispatch          | TODO                | One alloc per sentence instead of three. |
+| **`Vec::with_capacity()`** on `ChunkParser` buffer                     | `src/llm.rs`                                 | TODO                | Avoids realloc churn during streaming. |
+| **Delete recorded WAV after STT inference**                            | `src/stt.rs::listen_and_transcribe`          | TODO                | Frees `/tmp` (RAM-backed on Armbian) once per press. |
+| **`musl` static binary** instead of `gnu` glibc                         | `.cargo/config.toml` target spec             | TODO                | Smaller libc resident pages; fully self-contained binary. |
+| **Drop SenseVoice when idle** (reload-on-demand)                       | `src/stt.rs::stt_loop`                       | Won't fix           | ~1 GB recoverable but adds 22 s cold-load on every press — not worth. |
+
+Single biggest non-Rust lever: **smaller model** — swap
+Llama-3.2-3B (4 GB) for Llama-3.2-1B (~1 GB), freeing ~3 GB at a
+quality cost. Tracked in `14_TODO.md` and `10_SPECS.md`.
+
 ## LLM (decode throughput)
 
 | Model                                | Quant   | Engine      | Hardware      | Load (cold) | First token | Decode    | Notes / date |
