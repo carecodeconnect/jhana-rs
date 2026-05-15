@@ -23,7 +23,7 @@ appended here, not back into those docs.
   "the LLM struggling to keep up" at this rate.
 - The 74 s cold load matters operationally: the TUI must not show a
   "failed" state inside that window. `src/llm.rs` should be checked
-  for a load timeout ≥ 90 s (currently 60 s — bug filed in TODO.md
+  for a load timeout ≥ 90 s (currently 60 s — bug filed in 14_TODO.md
   via this doc).
 - Subsequent loads in the same session are faster (page-cache hit on
   the 4.35 GB `.rkllm` blob) — not yet measured but expected.
@@ -43,7 +43,7 @@ appended here, not back into those docs.
 | Engine        | Model                          | Hardware      | RTF / Latency             | Notes / date |
 |---------------|--------------------------------|---------------|---------------------------|---------------|
 | **espeak-ng**  | (formant synth, no model)      | CPU           | ~0.02 s synth per cue      | Current baseline TTS for jhana-rs (2026-05-15). Robotic but always works. Used for TUI cues and meditation narration until Piper-rs lands. |
-| Piper CLI      | en_US-lessac-medium (~60 MB ONNX) | CPU         | 0.75–0.87 s per ~7-word sentence, RTF ~0.31 | Working stack on the Radxa 5.10 image (2026-05-07). Currently **broken** on Armbian 6.1 due to libpiper_phonemize ↔ espeak-ng symbol mismatch; see `TROUBLESHOOTING.md`. |
+| Piper CLI      | en_US-lessac-medium (~60 MB ONNX) | CPU         | 0.75–0.87 s per ~7-word sentence, RTF ~0.31 | Working stack on the Radxa 5.10 image (2026-05-07). Currently **broken** on Armbian 6.1 due to libpiper_phonemize ↔ espeak-ng symbol mismatch; see `12_TROUBLESHOOTING.md`. |
 | Piper CLI w/ `rknpu` provider | same           | (fell back to CPU) | Same as CPU       | `rknpu` provider in sherpa-onnx fell back to CPU; not recognised as an EP. |
 | Paroli (Piper-rknn, external) | Piper VITS               | RK3588 NPU    | 4.3× speedup vs CPU       | Independent benchmark from [marty1885/paroli](https://github.com/marty1885/paroli). Indicates the NPU path is worthwhile for TTS once we move off Piper CLI. |
 

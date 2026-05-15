@@ -13,7 +13,7 @@ running notes appended as additional evidence is collected.
 | LLM runtime      | RKNPU driver **v0.9.8** builtin (OK for RKLLM); `librkllmrt.so` v1.2.3 |
 | LLM model        | `~/models/Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm` (4.35 GB) |
 | STT runtime      | RKNN v2.2.0 via sensevoice-rs (Rust); model in `~/models/sensevoice/` |
-| TTS runtime      | espeak-ng baseline (Piper broken on Armbian — see TROUBLESHOOTING.md) |
+| TTS runtime      | espeak-ng baseline (Piper broken on Armbian — see 12_TROUBLESHOOTING.md) |
 | Display          | 720×1280 portrait DSI via the Uctronics panel (works)        |
 | Audio in / out   | Uctronics codec on ALSA card 1, S32_LE 48 kHz native capture |
 | GPIO buttons     | Up=63, Down=43, Enter=139, Back=138 (wired in `src/gpio.rs`) |
@@ -27,7 +27,7 @@ The whole hardware-vs-software story is split across docs:
 - [06_KERNEL.md](06_KERNEL.md) — NPU driver and RKLLM init issues.
 - [08_DISPLAY.md](08_DISPLAY.md) — DSI panel + Uctronics LCD driver.
 - [09_AUDIO.md](09_AUDIO.md) — codec + microphone + speaker pipeline.
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — known-bad overlay variants and recovery procedures.
+- [12_TROUBLESHOOTING.md](12_TROUBLESHOOTING.md) — known-bad overlay variants and recovery procedures.
 
 ## Board
 

@@ -14,7 +14,7 @@ on dev machine, edit `/boot/armbianEnv.txt` to remove `uctronics-audio`
 from `overlays=`, save, put back, reboot.
 
 See [09_AUDIO.md](09_AUDIO.md) "DT overlay breaks networking" and
-[SKILLS.md](SKILLS.md) "Mount the Rock's microSD on the dev machine".
+[13_SKILLS.md](13_SKILLS.md) "Mount the Rock's microSD on the dev machine".
 
 ### Confirmed-bad overlay variants (do not redeploy these)
 
@@ -70,4 +70,4 @@ The Piper binary loads the ONNX model (after we hex-patched its IR
 version from 9 → 8) but dies before generating audio.
 
 Workaround: use `espeak-ng -w` directly for cue tones; defer Piper
-re-install / `piper-rknn-rs` port. See `docs/TODO.md`.
+re-install / `piper-rknn-rs` port. See `docs/14_TODO.md`.

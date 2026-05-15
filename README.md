@@ -137,7 +137,7 @@ rustflags = ["-C", "target-feature=+fp16"]
 
 ## Specifications
 
-See [docs/SPECS.md](docs/SPECS.md) for full technical specifications including
+See [docs/10_SPECS.md](docs/10_SPECS.md) for full technical specifications including
 hardware details, library assessments, model selection, and risk register.
 
 ## License

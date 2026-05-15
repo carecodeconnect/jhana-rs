@@ -388,9 +388,9 @@ models. The candidates that survive:
 |----------------------------------|---------------:|-----------|---------------:|-------------------------------------------------------------------------------------------------------------|
 | **Llama-3.2-3B-Instruct**        |     3 B (dense) | w8a8 g128 |      **4.35 GB** | Already on device at `~/models/Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm`. Tool-call trained.            |
 | **Llama-3.2-1B-Instruct**        |     1 B (dense) | w8a8      |      ~1.0 GB    | Has RKLLM conversions on HF (jamescallander/c01zaut). Worth testing for decode-speed gains.                 |
-| **Qwen2.5-3B-Instruct**          |     3 B (dense) | w8a8      |      ~3.5 GB    | Pre-converted by [jamescallander](https://huggingface.co/jamescallander) per `docs/TODO.md`. Tool-call OK.  |
+| **Qwen2.5-3B-Instruct**          |     3 B (dense) | w8a8      |      ~3.5 GB    | Pre-converted by [jamescallander](https://huggingface.co/jamescallander) per `docs/14_TODO.md`. Tool-call OK.  |
 | **Qwen3-1.7B**                   |     1.7 B (dense) | w8a8     |      ~1.7 GB    | Newest Qwen3 small model. RKLLM conversion availability TBD; if conversion exists this is the top pick.     |
-| **Gemma-3-4B**                   |     4 B (dense) | w8a8      |      ~4.5 GB    | Pre-converted, mentioned in TODO.md. Gemma 3 has tool-call training.                                        |
+| **Gemma-3-4B**                   |     4 B (dense) | w8a8      |      ~4.5 GB    | Pre-converted, mentioned in 14_TODO.md. Gemma 3 has tool-call training.                                        |
 | **Phi-3-mini-3.8B**              |     3.8 B (dense) | w8a8     |      ~4 GB     | Mature, well-supported. RKLLM conversion availability TBD.                                                  |
 
 Rejected for the Rock (following pi_sandbox's logic, downsized):
@@ -438,7 +438,7 @@ small enough to fit. The Rock list is therefore all dense, capped at
   trained variants.
 - **[jamescallander RK3588 collection](https://huggingface.co/collections/jamescallander/rk3588-rkllm-models)**
   — also maintains a Qwen2.5 + Llama 3.2 conversion set; mentioned
-  in `docs/TODO.md`.
+  in `docs/14_TODO.md`.
 - **[Are We Learning Yet?](https://www.arewelearningyet.com/)** — Rust
   ML ecosystem tracker; useful when picking a Rust-side inference
   crate to pair with the model.
@@ -685,7 +685,7 @@ jhana-rs/
   Cargo.toml
   rustfmt.toml
   docs/
-    SPECS.md              this file
+    10_SPECS.md              this file
   src/
     main.rs               orchestration + TUI event loop
     llm.rs                llama-cpp-rs wrapper, sentence buffering

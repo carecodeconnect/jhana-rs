@@ -696,7 +696,7 @@ so future sessions don't have to redo the searches.
   ezrkllm benchmarks. Useful as code and as a reference layout.
 - **[NotPunchnox/rkllama](https://github.com/NotPunchnox/rkllama)** —
   Ollama- / OpenAI-compatible HTTP server wrapping RKLLM. Matches
-  the Pi-agent-harness architecture in `SPECS.md`; lets `pi` call
+  the Pi-agent-harness architecture in `10_SPECS.md`; lets `pi` call
   `/v1/chat/completions` against the NPU without us writing a
   custom server.
 - **[Pelochus/armbian-build-rknpu-updates](https://github.com/Pelochus/armbian-build-rknpu-updates)**

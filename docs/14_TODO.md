@@ -1,7 +1,7 @@
 # TODO: jhana-rs POC/MVP
 
 Tracks all steps from initial hardware setup through Phase 1 POC completion.
-See [SPECS.md](SPECS.md) for full technical specifications.
+See [10_SPECS.md](10_SPECS.md) for full technical specifications.
 
 **POC success criterion (Phase 1):** Text prompt -> LLM streams meditation
 text -> ratatui displays sentences with pause markers -> Piper generates WAV

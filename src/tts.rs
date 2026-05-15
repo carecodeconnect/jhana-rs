@@ -8,7 +8,7 @@
 //!
 //! Piper CLI is broken on Armbian: `libpiper_phonemize.so.1` references
 //! `espeak_TextToPhonemesWithTerminator`, which Armbian's espeak-ng 1.51
-//! does not export. See docs/TROUBLESHOOTING.md.
+//! does not export. See docs/12_TROUBLESHOOTING.md.
 //!
 //! espeak-ng is the simplest working baseline: pure formant synthesis,
 //! single binary, no neural model, no GPU/NPU. The voice is robotic but
@@ -19,7 +19,7 @@
 //!
 //! Move to `piper-rs` (Rust crate, neural VITS, natural voice) on CPU,
 //! then `piper-rknn-rs` on the RK3588 NPU for the VITS decoder
-//! (~4× speedup). See docs/TODO.md.
+//! (~4× speedup). See docs/14_TODO.md.
 
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};

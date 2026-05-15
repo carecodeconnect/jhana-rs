@@ -75,7 +75,7 @@ mirroring in jhana-rs:
   pinmuxes them to other functions, which **hung systemd at boot
   every time**. The fix is `&gpio1` (`GPIO1_B5` for sdmode and
   `GPIO1_A2/A3/A5` for the three gainsel bits). See
-  `docs/TROUBLESHOOTING.md` for the full timeline.
+  `docs/12_TROUBLESHOOTING.md` for the full timeline.
 
 The earlier diagnosis ("TRCM clock gated to TX") was a red herring
 caused by reading the wrong bits of the I2S word; the clock is fine.
