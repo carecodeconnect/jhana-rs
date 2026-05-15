@@ -261,11 +261,13 @@ export component MainWindow inherits Window {
             current-say: root.current-say;
             active-tool: root.active-tool;
             pause-remaining: root.pause-remaining;
-            min-height: 600px;
+            min-height: 240px;
+            vertical-stretch: 4;
         }
         ActivityLog {
             entries: root.log-entries;
-            min-height: 580px;
+            min-height: 240px;
+            vertical-stretch: 6;
         }
     }
 
