@@ -18,8 +18,11 @@ WAV_IN=/tmp/jhana-e2e-in.wav
 WAV_OUT=/tmp/jhana-e2e-out.wav
 BEEP_START=/tmp/jhana-e2e-start.wav
 BEEP_STOP=/tmp/jhana-e2e-stop.wav
-SPK="plughw:1,0"
-MIC="plughw:1,0"
+# PA owns the Uctronics codec in system mode, so route through PA's
+# ALSA plug for `arecord -D pulse` and paplay for output.
+export PULSE_SERVER="${PULSE_SERVER:-unix:/var/run/pulse/native}"
+PA_SINK="alsa_output.platform-uctronics-sound.stereo-fallback"
+MIC="pulse"
 
 PIPER=/usr/local/bin/piper
 PIPER_MODEL=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium-ir8.onnx
@@ -46,11 +49,11 @@ echo
 echo "Get ready — cue coming in 2 seconds..."
 sleep 2
 # Play "Speak now" through the speaker so the user hears the cue.
-aplay -q -D "$SPK" "$BEEP_START" 2>/dev/null
+paplay --device "$PA_SINK" "$BEEP_START" 2>/dev/null
 sleep 0.3  # let speaker amp pop decay before sampling
 arecord -D "$MIC" -f S32_LE -r 48000 -c 1 -d 5 "$WAV_IN_NATIVE" 2>&1 | tail -1
 # "Stop" cue — also lets the user know recording ended.
-aplay -q -D "$SPK" "$BEEP_STOP" 2>/dev/null
+paplay --device "$PA_SINK" "$BEEP_STOP" 2>/dev/null
 
 echo
 echo "==> Resampling to S16_LE 16 kHz mono for SenseVoice..."
@@ -84,7 +87,7 @@ if [[ -x "$PIPER" && -f "$PIPER_MODEL" ]]; then
        --output_file "$WAV_OUT" --length_scale 1.3 2>/tmp/piper-err.log; then
     if [[ -s "$WAV_OUT" ]]; then
       echo "==> Playing back transcription on speaker..."
-      aplay -q -D "$SPK" "$WAV_OUT" 2>&1 | tail -1
+      paplay --device "$PA_SINK" "$WAV_OUT" 2>&1 | tail -1
     else
       echo "Piper produced empty output; skipping playback."
       tail -3 /tmp/piper-err.log
