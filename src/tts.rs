@@ -18,12 +18,26 @@
 //! [marty1885/streaming-piper](https://huggingface.co/marty1885/streaming-piper))
 //! and restart `jhana-rs.service`. No recompile.
 
-use std::process::Command;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender};
 
 use log::{error, info};
 
 use crate::config;
+
+/// Long-lived Moonshine worker subprocess. We spawn it once at TTS
+/// thread startup if the engine is `"moonshine"`, then write one JSON
+/// line per request to its stdin and read one JSON line back. Keeps
+/// the Kokoro voice loaded across utterances (~3 s load is paid once).
+struct MoonshineWorker {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<std::process::ChildStdout>,
+}
+
+static MOONSHINE_WORKER: Mutex<Option<MoonshineWorker>> = Mutex::new(None);
 
 /// Messages sent to the TTS thread.
 #[derive(Debug)]
@@ -91,6 +105,13 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
     // Pre-render the meditation bell once.
     render_bell();
 
+    // If the configured engine is Moonshine, spawn the persistent
+    // Python worker now so the first sentence doesn't pay the 3 s
+    // voice-load cost.
+    if config::get().tts.engine == "moonshine" {
+        spawn_moonshine_worker();
+    }
+
     while let Ok(cmd) = rx.recv() {
         match cmd {
             TtsCommand::Speak(sentence) => speak_sentence(&sentence),
@@ -114,22 +135,39 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
 }
 
 /// Synthesise `sentence` to WAV via the configured engine, then play
-/// through PA. Falls back to espeak-ng if paroli fails.
+/// through PA. Falls back to espeak-ng if the primary engine fails.
 fn speak_sentence(sentence: &str) {
     let preview = &sentence[..sentence.len().min(50)];
     let start = std::time::Instant::now();
 
     let cfg = &config::get().tts;
     let mut synthesised = false;
-    if cfg.engine == "paroli" && cfg.paroli.is_some() {
-        synthesised = synth_with_paroli(sentence);
-        if synthesised {
-            info!(
-                "TTS (paroli): {:.2}s — {preview}",
-                start.elapsed().as_secs_f32()
-            );
+
+    match cfg.engine.as_str() {
+        "paroli" if cfg.paroli.is_some() => {
+            synthesised = synth_with_paroli(sentence);
+            if synthesised {
+                info!(
+                    "TTS (paroli): {:.2}s — {preview}",
+                    start.elapsed().as_secs_f32()
+                );
+            }
+        }
+        "moonshine" if cfg.moonshine.is_some() => {
+            synthesised = synth_with_moonshine(sentence);
+            if synthesised {
+                info!(
+                    "TTS (moonshine): {:.2}s — {preview}",
+                    start.elapsed().as_secs_f32()
+                );
+            }
+        }
+        "espeak-ng" => {}
+        other => {
+            error!("Unknown tts.engine '{other}' — falling back to espeak");
         }
     }
+
     if !synthesised {
         if synth_with_espeak(sentence) {
             info!(
@@ -137,12 +175,112 @@ fn speak_sentence(sentence: &str) {
                 start.elapsed().as_secs_f32()
             );
         } else {
-            error!("TTS failed (both engines) for: {preview}");
+            error!("TTS failed (all engines) for: {preview}");
             return;
         }
     }
 
     play_wav(WAV_PATH);
+}
+
+/// Spawn the persistent Moonshine worker subprocess.
+fn spawn_moonshine_worker() {
+    let cfg = match &config::get().tts.moonshine {
+        Some(m) => m,
+        None => {
+            error!("tts.engine = 'moonshine' but tts.moonshine block missing");
+            return;
+        }
+    };
+
+    info!("starting Moonshine worker (voice={})", cfg.voice);
+    let mut child = match Command::new(&cfg.python)
+        .args([
+            &cfg.script,
+            "--voice",
+            &cfg.voice,
+            "--language",
+            &cfg.language,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to spawn moonshine worker: {e}");
+            return;
+        }
+    };
+
+    let stdin = match child.stdin.take() {
+        Some(s) => s,
+        None => {
+            error!("moonshine worker: no stdin");
+            return;
+        }
+    };
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            error!("moonshine worker: no stdout");
+            return;
+        }
+    };
+    let mut stdout = BufReader::new(stdout);
+
+    // Wait for the ready handshake line.
+    let mut ready_line = String::new();
+    match stdout.read_line(&mut ready_line) {
+        Ok(_) => info!("moonshine worker ready: {}", ready_line.trim()),
+        Err(e) => {
+            error!("moonshine worker readline failed: {e}");
+            return;
+        }
+    }
+
+    *MOONSHINE_WORKER.lock().unwrap() = Some(MoonshineWorker { child, stdin, stdout });
+}
+
+/// Synthesise via the persistent Moonshine worker. Writes the WAV at WAV_PATH.
+fn synth_with_moonshine(sentence: &str) -> bool {
+    let mut guard = MOONSHINE_WORKER.lock().unwrap();
+    let w = match guard.as_mut() {
+        Some(w) => w,
+        None => {
+            error!("moonshine worker not running");
+            return false;
+        }
+    };
+
+    // Escape text for JSON; build request line.
+    let req = serde_json::json!({ "text": sentence, "out": WAV_PATH });
+    if let Err(e) = writeln!(w.stdin, "{req}") {
+        error!("moonshine worker write failed: {e}");
+        return false;
+    }
+    if let Err(e) = w.stdin.flush() {
+        error!("moonshine worker flush failed: {e}");
+        return false;
+    }
+
+    let mut resp = String::new();
+    if let Err(e) = w.stdout.read_line(&mut resp) {
+        error!("moonshine worker read failed: {e}");
+        return false;
+    }
+    match serde_json::from_str::<serde_json::Value>(resp.trim()) {
+        Ok(v) if v.get("ok").and_then(|b| b.as_bool()) == Some(true) => true,
+        Ok(v) => {
+            error!("moonshine worker error: {}", v.get("error").map_or("?", |x| x.as_str().unwrap_or("?")));
+            false
+        }
+        Err(e) => {
+            error!("moonshine bad response: {e} (raw: {})", resp.trim());
+            false
+        }
+    }
 }
 
 /// Run paroli-cli over `sentence`, writing the WAV at `WAV_PATH`.

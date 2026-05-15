@@ -77,6 +77,24 @@ pub struct TtsConfig {
     pub espeak_rate: u32,
     #[serde(default)]
     pub paroli: Option<ParoliConfig>,
+    #[serde(default)]
+    pub moonshine: Option<MoonshineConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MoonshineConfig {
+    pub python: String,
+    pub script: String,
+    pub voice: String,
+    #[serde(default = "default_language")]
+    pub language: String,
+    #[serde(default)]
+    #[expect(dead_code)] // documentation field, not consumed by code
+    pub notes: String,
+}
+
+fn default_language() -> String {
+    "en".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -106,6 +124,7 @@ impl Default for TtsConfig {
             espeak_amplitude: 100,
             espeak_rate: 145,
             paroli: None,
+            moonshine: None,
         }
     }
 }

@@ -53,6 +53,13 @@
       "ld_library_path": "/home/ubuntu/paroli-build/onnxruntime-linux-aarch64-1.14.1/lib:/home/ubuntu/paroli-build/piper_phonemize/lib",
       "length_scale": 1.3,
       "notes": "Streaming Piper TTS via paroli-cli. Voice = ljspeech (single English female). Swap encoder/decoder/config for a different voice."
+    },
+    "moonshine": {
+      "python": "/home/ubuntu/moonshine-venv/bin/python3",
+      "script": "/home/ubuntu/jhana-rs/scripts/moonshine_tts_worker.py",
+      "voice": "kokoro_am_michael",
+      "language": "en",
+      "notes": "Moonshine Voice (Useful Sensors, Feb 2026). Pip-installed Python lib with its own MIT G2P. ~50 voices incl. male (kokoro_am_michael, am_adam, am_eric, am_onyx ...). RTF ~1.6 on CPU (no NPU path yet). To use: set tts.engine = 'moonshine'. Voice swap via the 'voice' field above."
     }
   },
   "ui": {
