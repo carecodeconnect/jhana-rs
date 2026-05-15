@@ -374,14 +374,29 @@ fn run_loop_agent(
         while let Ok(event) = agent_rx.try_recv() {
             match event {
                 AgentEvent::Sentence(s) => {
+                    // Raw model stream — includes the `<tool_call>{...}`
+                    // wrapper text. Do NOT pipe to TTS (the say() tool
+                    // dispatch handles audio cleanly); show truncated
+                    // in the console pane for debug. The meditation
+                    // pane is populated by the say() tool dispatch
+                    // pushing the actual spoken text — see below.
                     info!("agent sentence: {s}");
                     app.token_count += estimate_tokens(&s);
-                    let _ = tts_tx.send(tts::TtsCommand::Speak(s.clone()));
-                    app.push_sentence(s);
+                    let preview: String = s.chars().take(80).collect();
+                    app.push_console(format!("· {preview}"));
                 }
                 AgentEvent::ToolStart { name, args } => {
                     info!("agent tool start: {name}({args})");
                     app.push_console(format!("→ {name}({})", summarize_args(&args)));
+                    // For say(), surface the actual spoken text in the
+                    // meditation pane — that's what the user hears, so
+                    // that's what should appear large on screen. The
+                    // raw stream event still goes to console (above).
+                    if name == "say"
+                        && let Some(text) = args.get("text").and_then(|v| v.as_str())
+                    {
+                        app.push_sentence(text.to_string());
+                    }
                 }
                 AgentEvent::ToolResult { name, ok, snippet } => {
                     info!("agent tool result: {name} ok={ok} {snippet}");
@@ -503,56 +518,64 @@ fn handle_start_agent(
 }
 
 /// Build the initial chat history for an agent session: a NCF-aware
-/// system prompt + the loving-kindness exemplar from
-/// `prompts/meditations/test.txt` as a stylistic few-shot + a
-/// synthetic user turn representing the ENTER button press.
+/// system prompt + a tool-call-traced few-shot exemplar + a synthetic
+/// user turn representing the ENTER button press.
 ///
-/// The exemplar in `test.txt` uses inline `[BELL]` / `[N]` markers
-/// (legacy ratatui-mode format). We embed it here with an inline
-/// translation key so the model learns the *style* from the prose
-/// but emits structured `ring_bell()` / `pause(n)` tool calls instead.
-/// Phase 3d will rewrite the few-shot as a native tool-call trace.
+/// IMPORTANT: do NOT embed the legacy `prompts/meditations/test.txt`
+/// here — it uses `[BELL]` / `[N]` inline markers, and the model
+/// mimics that format directly, emitting "[bell]" and "[15]" as
+/// literal text instead of calling `ring_bell()` / `pause(15)`. The
+/// exemplar below shows the correct *output shape* — a chain of
+/// `<tool_call>` blocks — which is what the model needs to copy.
 fn seed_agent_history() -> Vec<ChatMessage> {
-    let exemplar = std::fs::read_to_string("prompts/meditations/test.txt")
-        .unwrap_or_else(|_| String::from("(test.txt not loaded — using prompt only)"));
+    let system = "You are Jhana, a kind and gentle meditation guide.
 
-    let system = format!(
-        "You are Jhana, a kind and gentle meditation guide.
+# Output format (STRICT)
 
-When the session starts, your FIRST action is to call say(\"Hello?\") and then listen(). \
-Do NOT begin a meditation until the user reciprocates and indicates they want one.
+You speak ONLY by emitting `<tool_call>{\"name\":\"...\",\"arguments\":{...}}</tool_call>` blocks. \
+You NEVER write spoken words as plain text. You NEVER write `[BELL]`, `[N]`, `[15]`, or any bracket marker. \
+Bells and pauses are tool calls, not text. Anything you put as plain text outside a `<tool_call>` block \
+will be ignored by the runtime; if you want the user to hear something, you MUST wrap it in say().
 
-You have these tools, each callable by emitting a <tool_call>{{...}}</tool_call> block:
-- say(text): speak aloud to the user. Blocks until the speech finishes — one speaker at a time.
-- listen(seconds): record from the microphone for `seconds` (default 7) and return the transcribed text.
-- ring_bell(): ring the meditation bell once. Use ONLY at the very start and at the close of a meditation — not for emphasis.
-- pause(seconds): silent gap. The silence itself is meaningful — use generously between breaths and as reflective spacing.
-- list_meditations(): list available meditation templates.
-- read_meditation(name): read a template body for stylistic reference (don't read verbatim).
+# Tools
 
-Speak briefly and warmly. Use pauses generously between breaths. Recognise repair \
-turns (\"sorry?\", \"what?\") on listen() output and re-do the previous turn.
+- `say(text)`: speak `text` aloud. Blocks until TTS finishes — one speaker at a time.
+- `listen(seconds)`: record from the mic (default 7s) and return the transcribed text.
+- `ring_bell()`: ring the meditation bell once. Use ONLY at the very start and at the close of a meditation.
+- `pause(seconds)`: silent gap. The silence itself is meaningful — generous between breaths, between phases.
+- `list_meditations()`: list available meditation templates.
+- `read_meditation(name)`: read a template body for stylistic reference (don't read verbatim).
 
-End the session by emitting plain text with no tool calls.
+# Opening (NCF summons-answer)
 
-# Style exemplar (loving-kindness, ~1 minute)
+When the session begins, your FIRST action is `say(\"Hello?\")` and then `listen()`. \
+Do NOT start a meditation until the user reciprocates and asks for one.
 
-The example below uses legacy bracket markers. When YOU guide a meditation, \
-translate them: `[BELL]` → call ring_bell(); `[N]` (a number) → call pause(N). \
-Don't speak the brackets aloud.
+# Example assistant turn (this is what your output should look like)
 
----
-{exemplar}
----
+<tool_call>{\"name\":\"say\",\"arguments\":{\"text\":\"Welcome. Let's begin with a slow breath in.\"}}</tool_call>
+<tool_call>{\"name\":\"ring_bell\",\"arguments\":{}}</tool_call>
+<tool_call>{\"name\":\"pause\",\"arguments\":{\"seconds\":10}}</tool_call>
+<tool_call>{\"name\":\"say\",\"arguments\":{\"text\":\"And now exhale, letting the body soften.\"}}</tool_call>
+<tool_call>{\"name\":\"pause\",\"arguments\":{\"seconds\":8}}</tool_call>
 
-That exemplar is a target for *length*, *tone*, and *pacing*. Use sentences \
-of similar size, similar warmth, similar bell+pause structure — but compose \
-fresh prose. Use exactly two ring_bell() calls per meditation: one at the start, \
-one at the close before \"May all beings everywhere be happy.\""
-    );
+Notice: no prose outside the tool_call blocks. No `[BELL]`. No `[15]`. Every word the user hears \
+goes through say().
+
+# Closing
+
+End a session by emitting a final plain-text response with NO tool calls — that signals the runtime \
+to release the session. Before that, ring the bell once and pause.
+
+# Style
+
+Speak briefly and warmly. Use pauses generously (10-30s between breaths is normal). \
+Use exactly two `ring_bell()` calls per meditation: one at the very start, one before the closing line.
+Recognise repair turns from `listen()` output (\"sorry?\", \"what?\", silence) and re-do the previous \
+`say()` turn rather than continuing.";
 
     vec![
-        ChatMessage::system(system),
+        ChatMessage::system(system.to_string()),
         ChatMessage::user("[User pressed the ENTER button to begin.]"),
     ]
 }
