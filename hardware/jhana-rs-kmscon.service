@@ -23,8 +23,8 @@ WorkingDirectory=/home/ubuntu/jhana-rs
 # kernel framebuffer console there. --silent suppresses kmscon's
 # own startup chatter so the meditation card is the first thing
 # the user sees.
-ExecStart=/usr/bin/kmscon --vt=1 --silent --no-switchvt -- \
-    /home/ubuntu/jhana-rs/target/release/jhana-rs
+ExecStart=/usr/bin/kmscon -l --vt=1 --silent --no-switchvt --term xterm-256color \
+    -- /home/ubuntu/jhana-rs/target/release/jhana-rs
 
 # kmscon advertises itself as xterm-256color, which gives ratatui
 # 24-bit colour + cursor positioning support. The old Linux-VT
