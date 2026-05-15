@@ -36,14 +36,8 @@ use crate::llm::LlmOutput;
 use crate::stt::SttResult;
 use crate::ui::{App, AppState, render};
 
-/// Spoken + on-screen greeting played on launch. Each line is rendered
-/// in the TUI and queued to the TTS thread, so the device introduces
-/// itself audibly through the Uctronics speaker.
-const WELCOME_LINES: &[&str] = &[
-    "Welcome to jhana-rs.",
-    "Press the enter button to begin a meditation.",
-    "Press back to quit.",
-];
+// Welcome lines now come from config/jhana.json → ui.welcome_lines so
+// you can edit the greeting without recompiling. See src/config.rs.
 
 /// Default meditation type loaded on startup.
 const DEFAULT_MEDITATION: &str = "test";
@@ -129,9 +123,9 @@ fn main() -> io::Result<()> {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
                 info!("LLM ready — welcome");
-                for line in WELCOME_LINES {
+                for line in &config::get().ui.welcome_lines {
                     let _ = tts_tx_for_welcome
-                        .send(tts::TtsCommand::Speak((*line).to_string()));
+                        .send(tts::TtsCommand::Speak(line.clone()));
                 }
             })
             .expect("failed to spawn welcome thread");
