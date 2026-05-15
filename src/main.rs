@@ -116,18 +116,19 @@ fn main() -> io::Result<()> {
                 while !stt::STT_READY.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                info!("STT ready — ringing startup bell + 'loading' announcement");
-                let _ = tts_tx_for_welcome.send(tts::TtsCommand::Bell);
+                info!("STT ready — 'loading' announcement");
                 let _ = tts_tx_for_welcome.send(tts::TtsCommand::Speak(
                     "Loading the meditation model. Please wait.".to_string(),
                 ));
 
-                // Stage 2: wait for LLM, then ring bell again + welcome.
+                // Stage 2: wait for LLM, then welcome.
+                // No app-side bell here on purpose — the bell is a
+                // model-emitted tool call ([BELL] in the meditation
+                // stream), not a startup flourish.
                 while !llm::LLM_READY.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                info!("LLM ready — ringing ready bell + welcome");
-                let _ = tts_tx_for_welcome.send(tts::TtsCommand::Bell);
+                info!("LLM ready — welcome");
                 for line in WELCOME_LINES {
                     let _ = tts_tx_for_welcome
                         .send(tts::TtsCommand::Speak((*line).to_string()));

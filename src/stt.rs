@@ -93,6 +93,70 @@ pub enum SttResult {
 /// ready to respond.
 pub static STT_READY: AtomicBool = AtomicBool::new(false);
 
+/// Pre-rendered "Speak now." prompt played at the start of each listen.
+const CUE_WAV: &str = "/tmp/jhana_speak_now.wav";
+
+/// Render the "Speak now." cue once at thread startup using the
+/// configured TTS engine. If paroli is configured we use it (matches
+/// the welcome / meditation voice). Falls back to espeak-ng on any
+/// failure so the cue always exists by the time the user presses ENTER.
+fn render_cue() {
+    let phrase = "Speak now.";
+    let tts = &crate::config::get().tts;
+
+    if tts.engine == "paroli"
+        && let Some(p) = &tts.paroli
+    {
+        let result = Command::new(&p.bin)
+            .env("LD_LIBRARY_PATH", &p.ld_library_path)
+            .args([
+                "--encoder",
+                &p.encoder,
+                "--decoder",
+                &p.decoder,
+                "-c",
+                &p.config,
+                "--espeak_data",
+                &p.espeak_data,
+                "--length_scale",
+                &p.length_scale.to_string(),
+                "--output_file",
+                CUE_WAV,
+                "--quiet",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(phrase.as_bytes());
+                    let _ = stdin.write_all(b"\n");
+                }
+                child.wait_with_output()
+            });
+        if matches!(&result, Ok(out) if out.status.success())
+            && std::fs::metadata(CUE_WAV).map(|m| m.len() > 44).unwrap_or(false)
+        {
+            info!("STT cue rendered via paroli at {CUE_WAV}");
+            return;
+        }
+        error!("STT cue paroli render failed; falling back to espeak-ng");
+    }
+
+    let ok = Command::new("espeak-ng")
+        .args(["-a", "100", "-s", "145", "-w", CUE_WAV, phrase])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        info!("STT cue rendered via espeak-ng at {CUE_WAV}");
+    } else {
+        error!("STT cue render failed; pressing ENTER will give no audible cue");
+    }
+}
+
 pub fn start(result_tx: Sender<SttResult>) -> Sender<SttCommand> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SttCommand>();
 
@@ -138,6 +202,11 @@ fn stt_loop(cmd_rx: &Receiver<SttCommand>, result_tx: &Sender<SttResult>) {
     );
     STT_READY.store(true, Ordering::Release);
 
+    // Pre-render the 'Speak now.' cue via the configured TTS engine so
+    // each press just hits paplay (cheap). Falls back to espeak-ng if
+    // paroli isn't configured / fails. Cached at /tmp/jhana_speak_now.wav.
+    render_cue();
+
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             SttCommand::Listen => {
@@ -160,25 +229,16 @@ fn listen_and_transcribe(svs: &SenseVoiceSmall, result_tx: &Sender<SttResult>) {
     // Signal that we're recording
     let _ = result_tx.send(SttResult::Recording);
 
-    // Audible "Speak now" cue. Played through PulseAudio (system-mode
-    // socket) so it's mixed with anything else the TTS thread is
-    // playing and goes to the configured uctronics sink reliably.
-    const CUE_WAV: &str = "/tmp/jhana_stt_cue.wav";
-    if Command::new("espeak-ng")
-        .args(["-a", "100", "-s", "145", "-w", CUE_WAV, "Speak now."])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        let _ = Command::new("paplay")
-            .env("PULSE_SERVER", "unix:/var/run/pulse/native")
-            .args([
-                "--device",
-                "alsa_output.platform-uctronics-sound.stereo-fallback",
-                CUE_WAV,
-            ])
-            .status();
-    }
+    // Audible "Speak now" cue (pre-rendered at thread startup via
+    // render_cue() — paroli where available, espeak-ng otherwise).
+    let _ = Command::new("paplay")
+        .env("PULSE_SERVER", "unix:/var/run/pulse/native")
+        .args([
+            "--device",
+            "alsa_output.platform-uctronics-sound.stereo-fallback",
+            CUE_WAV,
+        ])
+        .status();
 
     // Record from mic via arecord
     let wav_path = PathBuf::from(RECORD_PATH);
