@@ -64,10 +64,10 @@ quality cost. Tracked in `14_TODO.md` and `10_SPECS.md`.
 
 | Engine        | Model                          | Hardware      | RTF / Latency             | Notes / date |
 |---------------|--------------------------------|---------------|---------------------------|---------------|
-| **espeak-ng**  | (formant synth, no model)      | CPU           | ~0.02 s synth per cue      | Current baseline TTS for jhana-rs (2026-05-15). Robotic but always works. Used for TUI cues and meditation narration until Piper-rs lands. |
-| Piper CLI      | en_US-lessac-medium (~60 MB ONNX) | CPU         | 0.75–0.87 s per ~7-word sentence, RTF ~0.31 | Working stack on the Radxa 5.10 image (2026-05-07). Currently **broken** on Armbian 6.1 due to libpiper_phonemize ↔ espeak-ng symbol mismatch; see `12_TROUBLESHOOTING.md`. |
-| Piper CLI w/ `rknpu` provider | same           | (fell back to CPU) | Same as CPU       | `rknpu` provider in sherpa-onnx fell back to CPU; not recognised as an EP. |
-| Paroli (Piper-rknn, external) | Piper VITS               | RK3588 NPU    | 4.3× speedup vs CPU       | Independent benchmark from [marty1885/paroli](https://github.com/marty1885/paroli). Indicates the NPU path is worthwhile for TTS once we move off Piper CLI. |
+| espeak-ng     | (formant synth, no model)      | CPU           | ~0.02 s synth per cue      | Fallback baseline. Robotic. Used only when paroli fails or for the "Speak now" cue (now also paroli-rendered at startup; cached). |
+| Piper CLI      | en_US-lessac-medium (~60 MB ONNX) | CPU         | 0.75–0.87 s per ~7-word sentence, RTF ~0.31 | Working stack on the Radxa 5.10 image (2026-05-07). Broken on Armbian 6.1 (libpiper_phonemize ↔ espeak-ng symbol mismatch); see `12_TROUBLESHOOTING.md`. |
+| paroli (streaming Piper VITS) | ljspeech encoder.onnx + decoder.onnx (114 MB) | CPU (4× A76) | **RTF ≈ 1.46** (1.62 s infer / 5.62 s audio) — slower than playback | Measured on the Rock 5A, 2026-05-15. Worked but TTS queue lagged the LLM stream by tens of seconds; tool effects (bell) fired late as a result. |
+| **paroli (streaming Piper VITS)** | ljspeech encoder.onnx + decoder.**rknn** (47 MB) | **RK3588 NPU** | **RTF ≈ 0.29** (1.62 s infer / 5.62 s audio) — **3.5× faster than playback** | **Current default (2026-05-15).** ~5× speedup vs the CPU build above. The TTS queue stays ahead of the LLM stream, so bell/pause tool calls now fire close to when the model emits them. **User-reported voice quality is also noticeably better on the NPU build than the CPU one** — likely because CPU synth was so slow that the playback was hitting buffer-underflow gaps; the NPU run produces a clean continuous waveform. |
 
 ## Audio I/O
 
