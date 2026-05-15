@@ -19,6 +19,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use log::{info, warn};
@@ -211,13 +212,16 @@ struct ReadMeditationArgs {
 /// the existing `tts` / `stt` modules. The agent loop never touches
 /// audio devices directly — it always goes through these channels,
 /// preserving the existing serialised TTS / single-recorder behaviour.
-pub struct AgentCtx<'a> {
+///
+/// The STT receiver is `Arc<Mutex<...>>` because in agent mode it's
+/// shared between the agent thread (which drains it during `listen()`)
+/// and `main.rs` (which holds it for the inter-session idle period).
+/// At any given moment only one thread locks it, so the mutex
+/// contention is nil.
+pub struct AgentCtx {
     pub tts_tx: Sender<crate::tts::TtsCommand>,
     pub stt_tx: Sender<crate::stt::SttCommand>,
-    /// A dedicated STT-result channel owned by the agent (separate
-    /// from the TUI's normal one) — `listen()` is synchronous from
-    /// the agent's POV, so we wait on this directly.
-    pub stt_results: &'a Receiver<crate::stt::SttResult>,
+    pub stt_results: Arc<Mutex<Receiver<crate::stt::SttResult>>>,
     pub meditations_dir: PathBuf,
 }
 
@@ -444,7 +448,7 @@ fn run_completion(
 
 // ---------- Tool dispatch ----------
 
-fn dispatch_tool(call: &ToolCall, ctx: &AgentCtx<'_>) -> Result<Value, AgentError> {
+fn dispatch_tool(call: &ToolCall, ctx: &AgentCtx) -> Result<Value, AgentError> {
     let tool = Tool::from_name(&call.function.name)
         .ok_or_else(|| AgentError::Tool(format!("unknown tool: {}", call.function.name)))?;
 
@@ -476,12 +480,19 @@ fn dispatch_tool(call: &ToolCall, ctx: &AgentCtx<'_>) -> Result<Value, AgentErro
                 .map_err(|e| AgentError::Tool(format!("stt channel: {e}")))?;
             let timeout = Duration::from_secs(u64::from(a.seconds) + 30);
             let deadline = std::time::Instant::now() + timeout;
-            // Drain Recording / progress events; wait for the terminal one.
+            // Lock for the duration of this call — agent thread is the
+            // only stt_results consumer in agent mode, so contention is
+            // a non-issue. Drain Recording/Processing progress events,
+            // wait for the terminal Transcribed/Error.
+            let rx = ctx
+                .stt_results
+                .lock()
+                .map_err(|_| AgentError::Tool("stt_results mutex poisoned".into()))?;
             loop {
                 let remaining = deadline
                     .checked_duration_since(std::time::Instant::now())
                     .ok_or_else(|| AgentError::Tool("listen timeout".into()))?;
-                match ctx.stt_results.recv_timeout(remaining) {
+                match rx.recv_timeout(remaining) {
                     Ok(crate::stt::SttResult::Recording) => continue,
                     Ok(crate::stt::SttResult::Processing) => continue,
                     Ok(crate::stt::SttResult::Transcribed(text)) => {
@@ -556,7 +567,7 @@ pub fn run_agent(
     handle: &LLMHandle,
     history: &mut Vec<ChatMessage>,
     events: &Sender<AgentEvent>,
-    ctx: &AgentCtx<'_>,
+    ctx: &AgentCtx,
     cancel: &AtomicBool,
     max_turns: usize,
 ) -> Result<(), AgentError> {

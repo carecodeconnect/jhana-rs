@@ -40,6 +40,46 @@ Performance numbers live in [11_BENCHMARKS.md](11_BENCHMARKS.md).
   System voice is used for boot status ("ready"), brief cues, and
   error announcements; agent voice is everything Jhana herself says.
   CA-correctness: unambiguous speaker attribution.
+- [ ] **Post-meditation inquiry sequence** following the structured
+  interview pattern from Crane, Stanley, Rooney et al. (2015),
+  *"Disciplined Improvisation: Characteristics of Inquiry in
+  Mindfulness-Based Teaching"*
+  ([Mindfulness 6:1104–1114](https://link.springer.com/article/10.1007/s12671-014-0361-8)).
+  After a meditation closes, the agent opens an inquiry adjacency
+  pair: *"So, what did you notice?"* → `listen()` → respond from the
+  three-layer framework:
+  - **Layer 1 — Direct experience.** Reflect the user's sensory /
+    affective report without interpretation. ("You noticed your
+    breath got shallower.")
+  - **Layer 2 — Dialogue & exploration.** Open a probe: what's that
+    like? what came before / after?
+  - **Layer 3 — Linking.** Connect the noticed experience to the
+    broader frame of practice and daily life — only when the user
+    has settled into the first two.
+  Lives as a separate post-close sequence in the system prompt; the
+  agent enters it after the meditation ends, before the session-
+  closing turn. Probably warrants its own NCF section in
+  `15_INTERACTION.md` once implemented.
+
+  **Implementation inspiration: ELIZA / DOCTOR (Weizenbaum 1966), in
+  Rust.** The Rogerian reflection pattern that ELIZA's DOCTOR script
+  uses ("I am unhappy" → "Why are you unhappy?", reflecting first/second
+  pronouns and substituting prepared frames) is structurally close to
+  Crane et al.'s Layer 1 reflection. We won't drive the inquiry with
+  ELIZA itself (the LLM is strictly more capable), but the DOCTOR
+  script gives us:
+  - A vocabulary of reflection templates we can fold into the system
+    prompt as few-shot exemplars ("I notice you said X. What's it
+    like for you when Y?").
+  - A fallback path: if the LLM's inquiry reply seems shallow or
+    deflective, a deterministic ELIZA-style reflector could re-route
+    the turn to a known-good reflection.
+  - A debugging tool: run the inquiry script against an ELIZA Rust
+    crate (e.g. one of the community ports on crates.io) to see how
+    a pure pattern-matching baseline behaves, and contrast that with
+    Qwen3-1.7B's output.
+  Pick a Rust ELIZA port at implementation time; primary goal is the
+  reflection-template inspiration, not the deterministic engine.
 
 **POC success criterion (Phase 1):** Text prompt -> LLM streams meditation
 text -> ratatui displays sentences with pause markers -> Piper generates WAV

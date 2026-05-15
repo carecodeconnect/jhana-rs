@@ -220,7 +220,11 @@ pub fn preload() {
 /// depending on whether page cache is warm). Subsequent calls return
 /// the cached handle instantly. Call [`preload`] at startup to move
 /// this cost off the first-button-press hot path.
-fn get_or_load_model() -> Result<&'static LLMHandle, String> {
+///
+/// `pub(crate)` so `agent_loop::run_agent` can grab the handle directly
+/// for in-process inference, bypassing the streaming-thread pattern
+/// `start_streaming` uses.
+pub(crate) fn get_or_load_model() -> Result<&'static LLMHandle, String> {
     if let Some(handle) = MODEL.get() {
         return Ok(handle);
     }

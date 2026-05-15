@@ -31,6 +31,17 @@ pub struct Config {
     pub tts: TtsConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    /// Which agent harness to run: `"ratatui"` keeps the existing
+    /// inline-[BELL]/[N]-marker pipeline driven by `llm::start_streaming`;
+    /// `"agent"` runs the tool-driven `agent_loop::run_agent`. Default
+    /// is `"ratatui"` so missing config doesn't surprise anyone running
+    /// the binary off main. Flip in `config/jhana.json` to switch.
+    #[serde(default = "default_harness")]
+    pub harness: String,
+}
+
+fn default_harness() -> String {
+    "ratatui".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
