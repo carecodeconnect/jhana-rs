@@ -116,16 +116,18 @@ fn main() -> io::Result<()> {
                 while !stt::STT_READY.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                info!("STT ready — playing 'loading' announcement");
+                info!("STT ready — ringing startup bell + 'loading' announcement");
+                let _ = tts_tx_for_welcome.send(tts::TtsCommand::Bell);
                 let _ = tts_tx_for_welcome.send(tts::TtsCommand::Speak(
                     "Loading the meditation model. Please wait.".to_string(),
                 ));
 
-                // Stage 2: wait for LLM, then full welcome.
+                // Stage 2: wait for LLM, then ring bell again + welcome.
                 while !llm::LLM_READY.load(Ordering::Acquire) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                info!("LLM ready — playing welcome");
+                info!("LLM ready — ringing ready bell + welcome");
+                let _ = tts_tx_for_welcome.send(tts::TtsCommand::Bell);
                 for line in WELCOME_LINES {
                     let _ = tts_tx_for_welcome
                         .send(tts::TtsCommand::Speak((*line).to_string()));
