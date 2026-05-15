@@ -1,30 +1,29 @@
-//! Text-to-speech baseline via espeak-ng.
+//! Text-to-speech with paroli (streaming Piper) as the primary engine
+//! and espeak-ng as a robotic fallback.
 //!
-//! Runs TTS on a background thread, receiving sentences via an mpsc channel.
-//! Each sentence is synthesised by espeak-ng and played via `aplay` on the
-//! Uctronics speaker. Uses the same thread + mpsc pattern as GPIO and LLM.
+//! Runs TTS on a background thread, receiving sentences via an mpsc
+//! channel. Each sentence is synthesised to a WAV file (via paroli-cli
+//! or espeak-ng depending on `config/jhana.json` → `tts.engine`) and
+//! played through PulseAudio on the Uctronics speaker (system-mode
+//! PA, sink alsa_output.platform-uctronics-sound.stereo-fallback).
 //!
-//! # Why espeak-ng (right now)
+//! Pause + bell tools (LlmOutput::Pause / Bell) are also handled here:
+//! Pause = `std::thread::sleep`, Bell = `paplay` of a pre-rendered
+//! chime WAV.
 //!
-//! Piper CLI is broken on Armbian: `libpiper_phonemize.so.1` references
-//! `espeak_TextToPhonemesWithTerminator`, which Armbian's espeak-ng 1.51
-//! does not export. See docs/12_TROUBLESHOOTING.md.
+//! # Voice swap
 //!
-//! espeak-ng is the simplest working baseline: pure formant synthesis,
-//! single binary, no neural model, no GPU/NPU. The voice is robotic but
-//! always available. We can verify the full pipeline (LLM → TTS thread →
-//! audible speaker output) without untangling the C++ Piper toolchain.
-//!
-//! # Next step
-//!
-//! Move to `piper-rs` (Rust crate, neural VITS, natural voice) on CPU,
-//! then `piper-rknn-rs` on the RK3588 NPU for the VITS decoder
-//! (~4× speedup). See docs/14_TODO.md.
+//! Edit `config/jhana.json` → `tts.paroli.encoder/decoder/config`
+//! to point at a different streaming-piper voice (see
+//! [marty1885/streaming-piper](https://huggingface.co/marty1885/streaming-piper))
+//! and restart `jhana-rs.service`. No recompile.
 
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};
 
 use log::{error, info};
+
+use crate::config;
 
 /// Messages sent to the TTS thread.
 #[derive(Debug)]
@@ -46,47 +45,29 @@ pub enum TtsCommand {
 /// Rock). We use PA rather than raw `aplay` so we get software mixing,
 /// the original baseline's 100 %-sink-volume loudness path, and no
 /// per-utterance ALSA open (which on the Uctronics codec triggers a
-/// speaker-amp pop every time). See docs/09_AUDIO.md "Reference: the
-/// original AI in a Box loudness path".
+/// speaker-amp pop every time).
 const PULSE_SERVER: &str = "unix:/var/run/pulse/native";
 
-/// PulseAudio sink the Uctronics speaker exposes. Set as the default
-/// sink in /etc/pulse/system.pa, but we pass it explicitly here to be
-/// robust against module-default-device-restore resetting it.
+/// PulseAudio sink the Uctronics speaker exposes.
 const PULSE_SINK: &str = "alsa_output.platform-uctronics-sound.stereo-fallback";
-
-/// espeak-ng amplitude (0–200). 100 is the default and was the cleanest
-/// non-distorting setting on the Uctronics speaker in A/B testing —
-/// any higher and the small enclosure speaker clips. See docs/09_AUDIO.md.
-const ESPEAK_AMPLITUDE: &str = "100";
-
-/// espeak-ng speech rate (words/min). 145 is calm enough for meditation
-/// without dragging.
-const ESPEAK_RATE: &str = "145";
 
 /// Temporary WAV file for TTS output.
 const WAV_PATH: &str = "/tmp/jhana_tts.wav";
 
-/// Pre-rendered meditation-bell WAV. Generated once at TTS-thread
-/// startup via ffmpeg (a 523 Hz / C5 sine with a 2 s exponential decay)
-/// so the LLM's `[BELL]` marker can trigger an audible chime without
-/// shipping a binary asset.
+/// Pre-rendered meditation-bell WAV.
 const BELL_WAV: &str = "/tmp/jhana_bell.wav";
 
-/// Start the TTS background thread.
-///
-/// Returns a `Sender<TtsCommand>` for sending sentences to be spoken.
-/// The thread processes sentences sequentially — each one is synthesised
-/// via espeak-ng and played via `aplay`. If espeak-ng is missing the
-/// thread logs a one-time error and silently drops further sentences
-/// (graceful degradation — the rest of the pipeline keeps working).
+/// Start the TTS background thread. Returns a sender for sentences /
+/// pauses / bell commands. The thread loads the configured engine
+/// once (paroli or espeak-ng) and serialises all playback.
 pub fn start() -> Sender<TtsCommand> {
     let (tx, rx) = std::sync::mpsc::channel::<TtsCommand>();
 
     std::thread::Builder::new()
         .name("tts".into())
         .spawn(move || {
-            info!("TTS thread started (espeak-ng baseline)");
+            let cfg = &config::get().tts;
+            info!("TTS thread started (engine={})", cfg.engine);
             tts_loop(&rx);
             info!("TTS thread exiting");
         })
@@ -95,26 +76,19 @@ pub fn start() -> Sender<TtsCommand> {
     tx
 }
 
-/// TTS event loop — processes sentences until the channel closes.
+/// TTS event loop — processes commands until the channel closes.
 fn tts_loop(rx: &Receiver<TtsCommand>) {
-    // One-time availability check so we don't fight to spawn espeak per sentence.
-    match Command::new("espeak-ng").arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            info!("espeak-ng available");
-        }
-        _ => {
-            error!("espeak-ng not found — TTS will be silent");
-            while let Ok(cmd) = rx.recv() {
-                if let TtsCommand::Speak(s) = cmd {
-                    info!("TTS unavailable, skipping: {s}");
-                }
-            }
-            return;
-        }
+    // Availability check for the configured engine. We don't bail if
+    // the primary engine is missing — the speak path retries via the
+    // espeak-ng fallback per sentence, which is reasonable until we
+    // remove espeak-ng entirely.
+    if Command::new("espeak-ng").arg("--version").output().is_ok() {
+        info!("espeak-ng available (fallback)");
+    } else {
+        error!("espeak-ng not found — TTS will be silent if paroli fails");
     }
 
-    // Pre-render the meditation bell once. Cheap (<100 ms) but avoids
-    // re-synth on every [BELL] marker.
+    // Pre-render the meditation bell once.
     render_bell();
 
     while let Ok(cmd) = rx.recv() {
@@ -139,17 +113,113 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
     }
 }
 
-/// Generate a meditation-bell WAV at startup. We mix three sine
-/// partials with separate decay envelopes to approximate a Tibetan
-/// singing-bowl-ish sound rather than a flat synth beep:
-///
-///   - Fundamental 523 Hz (C5)   — loud, slow 4 s decay
-///   - Octave     1046 Hz (C6)   — softer, 1.5 s decay (the "ping")
-///   - Just fifth  784 Hz (G5)   — middle, 2.0 s decay (warmth)
-///
-/// Idempotent: re-renders on every run (cheap, <200 ms on the Rock).
-/// Cleaner than shipping a binary asset and works on any host where
-/// ffmpeg + lavfi are installed.
+/// Synthesise `sentence` to WAV via the configured engine, then play
+/// through PA. Falls back to espeak-ng if paroli fails.
+fn speak_sentence(sentence: &str) {
+    let preview = &sentence[..sentence.len().min(50)];
+    let start = std::time::Instant::now();
+
+    let cfg = &config::get().tts;
+    let mut synthesised = false;
+    if cfg.engine == "paroli" && cfg.paroli.is_some() {
+        synthesised = synth_with_paroli(sentence);
+        if synthesised {
+            info!(
+                "TTS (paroli): {:.2}s — {preview}",
+                start.elapsed().as_secs_f32()
+            );
+        }
+    }
+    if !synthesised {
+        if synth_with_espeak(sentence) {
+            info!(
+                "TTS (espeak): {:.2}s — {preview}",
+                start.elapsed().as_secs_f32()
+            );
+        } else {
+            error!("TTS failed (both engines) for: {preview}");
+            return;
+        }
+    }
+
+    play_wav(WAV_PATH);
+}
+
+/// Run paroli-cli over `sentence`, writing the WAV at `WAV_PATH`.
+fn synth_with_paroli(sentence: &str) -> bool {
+    let cfg = match &config::get().tts.paroli {
+        Some(p) => p,
+        None => return false,
+    };
+
+    let result = Command::new(&cfg.bin)
+        .env("LD_LIBRARY_PATH", &cfg.ld_library_path)
+        .args([
+            "--encoder",
+            &cfg.encoder,
+            "--decoder",
+            &cfg.decoder,
+            "-c",
+            &cfg.config,
+            "--espeak_data",
+            &cfg.espeak_data,
+            "--length_scale",
+            &cfg.length_scale.to_string(),
+            "--output_file",
+            WAV_PATH,
+            "--quiet",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(sentence.as_bytes());
+                let _ = stdin.write_all(b"\n");
+            }
+            child.wait_with_output()
+        });
+
+    match result {
+        Ok(out) if out.status.success() => std::fs::metadata(WAV_PATH)
+            .map(|m| m.len() > 44)
+            .unwrap_or(false),
+        Ok(out) => {
+            error!(
+                "paroli failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            false
+        }
+        Err(e) => {
+            error!("paroli error: {e}");
+            false
+        }
+    }
+}
+
+/// Robotic fallback via espeak-ng.
+fn synth_with_espeak(sentence: &str) -> bool {
+    let cfg = &config::get().tts;
+    Command::new("espeak-ng")
+        .args([
+            "-a",
+            &cfg.espeak_amplitude.to_string(),
+            "-s",
+            &cfg.espeak_rate.to_string(),
+            "-w",
+            WAV_PATH,
+            sentence,
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Generate a meditation-bell WAV at startup.
 fn render_bell() {
     let result = Command::new("ffmpeg")
         .args([
@@ -187,57 +257,6 @@ fn play_wav(path: &str) {
     {
         Ok(output) if output.status.success() => {}
         Ok(output) => error!("paplay failed: {}", String::from_utf8_lossy(&output.stderr)),
-        Err(e) => error!("paplay error: {e}"),
-    }
-}
-
-/// Synthesise `sentence` to WAV via espeak-ng and play it on the speaker.
-fn speak_sentence(sentence: &str) {
-    let preview = &sentence[..sentence.len().min(50)];
-    let start = std::time::Instant::now();
-
-    let synth = Command::new("espeak-ng")
-        .args([
-            "-a",
-            ESPEAK_AMPLITUDE,
-            "-s",
-            ESPEAK_RATE,
-            "-w",
-            WAV_PATH,
-            sentence,
-        ])
-        .output();
-
-    match synth {
-        Ok(output) if output.status.success() => {
-            info!(
-                "TTS: {:.2}s synth — {preview}",
-                start.elapsed().as_secs_f32()
-            );
-        }
-        Ok(output) => {
-            error!(
-                "espeak-ng failed ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return;
-        }
-        Err(e) => {
-            error!("espeak-ng error: {e}");
-            return;
-        }
-    }
-
-    match Command::new("paplay")
-        .env("PULSE_SERVER", PULSE_SERVER)
-        .args(["--device", PULSE_SINK, WAV_PATH])
-        .output()
-    {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => {
-            error!("paplay failed: {}", String::from_utf8_lossy(&output.stderr));
-        }
         Err(e) => error!("paplay error: {e}"),
     }
 }

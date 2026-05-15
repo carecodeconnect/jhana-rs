@@ -75,6 +75,28 @@ pub struct TtsConfig {
     pub engine: String,
     pub espeak_amplitude: u32,
     pub espeak_rate: u32,
+    #[serde(default)]
+    pub paroli: Option<ParoliConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ParoliConfig {
+    pub bin: String,
+    pub encoder: String,
+    pub decoder: String,
+    pub config: String,
+    pub espeak_data: String,
+    #[serde(default)]
+    pub ld_library_path: String,
+    #[serde(default = "default_length_scale")]
+    pub length_scale: f32,
+    #[serde(default)]
+    #[expect(dead_code)] // documentation field, not consumed by code
+    pub notes: String,
+}
+
+fn default_length_scale() -> f32 {
+    1.0
 }
 
 impl Default for TtsConfig {
@@ -83,6 +105,7 @@ impl Default for TtsConfig {
             engine: "espeak-ng".to_string(),
             espeak_amplitude: 100,
             espeak_rate: 145,
+            paroli: None,
         }
     }
 }
