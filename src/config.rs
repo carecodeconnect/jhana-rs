@@ -42,9 +42,20 @@ pub struct ModelConfig {
     pub top_p: f32,
     pub top_k: i32,
     pub repeat_penalty: f32,
+    /// Chat template to apply when formatting the prompt. Supported values:
+    /// `"llama-3"` (default — Llama 3.x family, `<|begin_of_text|>` /
+    /// `<|start_header_id|>` / `<|eot_id|>`), `"qwen"` (Qwen2.5 / Qwen3
+    /// ChatML — `<|im_start|>` / `<|im_end|>`). rkllm-rs does not apply
+    /// templates for us, so the wrong family here means garbled output.
+    #[serde(default = "default_chat_template")]
+    pub chat_template: String,
     #[serde(default)]
     #[expect(dead_code)] // documentation field, not consumed by code
     pub notes: String,
+}
+
+fn default_chat_template() -> String {
+    "llama-3".to_string()
 }
 
 #[derive(Debug, Deserialize)]

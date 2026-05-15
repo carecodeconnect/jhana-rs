@@ -305,12 +305,19 @@ pub fn start_streaming(tx: Sender<LlmOutput>, system: String, user: String) {
 fn run_inference(tx: &Sender<LlmOutput>, system: &str, user: &str) -> Result<(), String> {
     let handle = get_or_load_model()?;
 
-    // Llama 3 chat template
-    let prompt = format!(
-        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n\
-         {system}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n\
-         {user}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-    );
+    let prompt = match crate::config::active_model().chat_template.as_str() {
+        "qwen" => format!(
+            "<|im_start|>system\n{system}<|im_end|>\n\
+             <|im_start|>user\n{user}<|im_end|>\n\
+             <|im_start|>assistant\n"
+        ),
+        // Default: Llama-3 family template.
+        _ => format!(
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n\
+             {system}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n\
+             {user}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+        ),
+    };
 
     info!(
         "Starting NPU inference (max {} tokens)",

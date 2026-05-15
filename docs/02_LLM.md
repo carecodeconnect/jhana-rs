@@ -276,6 +276,72 @@ Rules:
 
 ---
 
+## Pre-converted RKLLM models on HuggingFace (2026-05-15 survey)
+
+Surveying who has done the HF → `.rkllm` quantization work so we know
+which model families can be dropped in vs. require us to run the
+`rkllm-toolkit` conversion ourselves. RKLLM toolkit currently at v1.2.x.
+
+- **`c01zaut`** ([HF profile](https://huggingface.co/c01zaut)) — broadest
+  coverage for text-only chat models targeting RK3588:
+  Llama-3.x (1B/3B/8B), Qwen2.5 (1.5B/3B/7B/14B), Gemma-2 (9B/27B),
+  Phi-3 / Phi-3.5-mini, Baichuan/Baichuan2, ChatGLM3, DeepSeek (coder
+  + chat 6.7B/7B), MiniCPM3-4B, InternLM2-chat-20B.
+- **`happyme531`** ([HF profile](https://huggingface.co/happyme531)) —
+  focused on multimodal + niche models: Qwen2.5-VL-3B, MiniCPM-V-2.6,
+  InternVL3.5-2B, Janus-Pro-1B, Gemma-3-270m, FastVLM-1.5B,
+  Qwen2-Audio, Qwen3-ASR-1.7B, Qwen3-Embedding/Reranker. Also lots of
+  RKNN2 conversions (TTS/STT/SD/SAM, not RKLLM).
+
+**No pre-converted Mistral / Ministral `.rkllm` exists in either repo.**
+Testing the Mistral family on the NPU requires running
+`rkllm-toolkit` ourselves from HF safetensors — half-day project on an
+x86 workstation with the toolkit installed, calibration dataset
+prepared, and tolerance for the architectures the toolkit doesn't
+support cleanly. Rockchip's official guide also documents Mistral as a
+supported source architecture in the toolkit, so the path is open —
+just not paved.
+
+### Tool-call viability check (Phase 1 of the pi-port branch)
+
+`src/bin/qwen-tool-test.rs` runs a single-prompt experiment that loads
+`Qwen3-1.7B_w8a8_g128_rk3588.rkllm`, feeds a Qwen3 chat-template
+prompt with a `ring_bell` tool definition, and verifies the model
+emits a parseable `<tool_call>{...}</tool_call>` block.
+
+Result (2026-05-15): **PASS.** 87 s cold load, 4 s inference,
+output `<tool_call>\n{"name": "ring_bell", "arguments": {}}\n</tool_call>`
+with no prose padding or malformed JSON. Qwen3-1.7B is fit for use
+as the tool-calling model behind a pi-compatible OpenAI HTTP shim.
+
+### On-device meditation generation (2026-05-15)
+
+After Phase 1 passed, swapped `active_model` to `qwen3-1.7b` on the
+`pi-port` branch and added a per-model `chat_template` field to
+`ModelConfig` (`"llama-3"` vs `"qwen"`) so `src/llm.rs` applies the
+right ChatML format. Llama-family models receive
+`<|begin_of_text|>` / `<|start_header_id|>` and Qwen receives
+`<|im_start|>` / `<|im_end|>`. Wrong template = garbled output, so
+this is required reading before swapping any future model.
+
+End-to-end ratatui test (`prompts/meditations/lotus_flower.txt` few-shot,
+inline `[BELL]` + `[N]` markers): **works well.** Decode noticeably
+snappier than the 3B Llama. Prose is on-tone for meditation guidance.
+One quirk: Qwen3-1.7B rings the bell more often than the system prompt
+asks (the "exactly 2 bells" rule isn't strict for this model) — acceptable
+for now; could be tightened with a stronger prompt or by enforcing the
+2-bell limit at the `ChunkParser` level.
+
+**Verdict:** Qwen3-1.7B is a good companion to the Llama-3.2-3B default.
+Llama-3B for richer prose and tighter system-prompt adherence; Qwen3-1.7B
+for ~3× faster decode, the option of structured tool calls (validated
+above), and lower RAM footprint. Both kept selectable via
+`active_model` in `config/jhana.json`. The pi-port branch defaults to
+Qwen3-1.7B because the structured-tool-call path is the whole point
+of that branch.
+
+---
+
 ## Original Python Implementation
 
 The jhana-dev Python app used:
