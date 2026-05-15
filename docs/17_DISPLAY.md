@@ -55,24 +55,43 @@ big-text meditation surface the whole time.
 
 ## Recommendations
 
-### Phase A (ship-today, low-risk): kmscon
+### Phase A (ship-today, low-risk): kmscon — STAGED 2026-05-15
 
-1. `sudo apt install kmscon` (Armbian Ubuntu 24.04 has it via universe).
-2. Configure `/etc/kmscon/kmscon.conf` to point at a TTF font with
-   good unicode block coverage — `DejaVu Sans Mono`, `Iosevka`, or
-   `JetBrains Mono` all work. Set the size large enough for the
-   Rock's 720×1280 display (e.g. `font-size=24` to match current
-   feel; size up later).
-3. Update `scripts/rock-run.sh` and the `jhana-rs.service` unit to
-   target `kmsconvt@tty1` instead of `getty@tty1`. `Conflicts=` line
-   updates accordingly.
-4. Re-add `tui-big-text = "0.7.3"` to `Cargo.toml`. Restore the big-
-   text rendering paths in `src/ui.rs` (commit `cb642b4` reverted
-   them; cherry-pick the original).
-5. Build, restart, watch the focal card now show actual scaled text.
+Implementation is **staged** in the repo, awaiting the next Rock-online
+session for `apt install kmscon`:
 
-Estimated effort: half a day. No code rewrites. Backwards-compatible
-fallback (re-enable `getty@tty1` to revert) is one systemctl command.
+- `hardware/jhana-rs-kmscon.service` — new systemd unit. Launches
+  kmscon on `--vt=1` with `jhana-rs` as the login program. Conflicts
+  with both `getty@tty1.service` and the previous `jhana-rs.service`,
+  so enabling it cleanly takes over tty1.
+- `hardware/kmscon.conf` — kmscon configuration. Uses `Monospace`
+  fontconfig name (resolves to DejaVu Sans Mono on Ubuntu/Armbian)
+  at size 24. `drm` + `hwaccel` for Panfrost-accelerated rendering.
+  `no-switchvt` because the device has no Ctrl-Alt-F1..F6 hardware.
+- `scripts/rock-kmscon-setup.sh` — one-shot installer. Run from the
+  dev machine: `./scripts/rock-kmscon-setup.sh`. Idempotent.
+  Rollback is `systemctl disable --now jhana-rs-kmscon.service &&
+  systemctl enable --now jhana-rs.service`.
+- `Cargo.toml` — `tui-big-text = "0.7.3"` re-added.
+- `src/ui.rs` — `BigText::builder().pixel_size(PixelSize::Quadrant)`
+  restored in `render_focal_card` and `render_loading_card`. Layout:
+  6-row big-text band + 1-row gap + plain-text mirror, centred
+  vertically with computed padding.
+
+To deploy on the Rock:
+
+```bash
+scripts/rock-kmscon-setup.sh          # one shot, ~30 s
+scripts/rock-log.sh -f                 # watch the new render path
+```
+
+Reverting (if kmscon misbehaves):
+
+```bash
+ssh ubuntu@rock-5a
+sudo systemctl disable --now jhana-rs-kmscon.service
+sudo systemctl enable  --now jhana-rs.service        # restores getty/Linux VT path
+```
 
 ### Phase B (longer-term, optional): cage + foot, plan Slint for v2
 

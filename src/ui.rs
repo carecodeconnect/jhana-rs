@@ -40,6 +40,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
 };
+use tui_big_text::{BigText, PixelSize};
 
 // ---------- Theme ----------
 
@@ -372,16 +373,12 @@ fn render_status_strip(frame: &mut Frame, area: ratatui::layout::Rect, app: &App
 
 /// Render the focal card.
 ///
-/// We can't make text *literally* larger on a Linux TTY (font is
-/// fixed at 32×16 px). Emphasis is built from:
-/// - Double-border framing
-/// - Centred alignment
-/// - Bold modifier
-/// - Generous whitespace above and below
-/// - Activity log items feel smaller by being crowded together
-///
-/// Real "big text" would need a graphical terminal (cage + foot, or
-/// leftwm + alacritty). See README / docs/14_TODO.md task #20.
+/// Big-text emphasis via `tui_big_text` rendering unicode quadrant
+/// block glyphs. Works correctly under **kmscon** (TTF-rasterised
+/// glyphs at sub-cell resolution). Under the in-kernel framebuffer
+/// console (`TERM=linux`) these glyphs render as decorative shapes —
+/// if you see those, kmscon isn't running. See `docs/17_DISPLAY.md`
+/// and `hardware/jhana-rs-kmscon.service`.
 fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let t = &app.theme;
     let block = Block::default()
@@ -392,7 +389,8 @@ fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let (focal_lines, sub_line) = match &app.active_tool {
+    // Big-text headline + plain-text mirror per active tool.
+    let (big_lines, mirror_text): (Vec<Line>, String) = match &app.active_tool {
         Some(ActiveTool::Pausing {
             ends_at,
             total_secs,
@@ -400,60 +398,61 @@ fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) 
             let remaining = ends_at
                 .saturating_duration_since(Instant::now())
                 .as_secs_f32();
+            let n = remaining.ceil() as u32;
             (
-                vec![format!("{}", remaining.ceil() as u32)],
-                Some(format!(
+                vec![Line::from(format!("{n}"))],
+                format!(
                     "silence  ·  {}/{}s",
                     (total_secs - remaining).ceil() as u32,
                     *total_secs as u32
-                )),
+                ),
             )
         }
-        Some(ActiveTool::RingingBell) => (vec!["♪".to_string()], Some("bell".to_string())),
-        Some(ActiveTool::Listening) => (vec!["listening".to_string()], Some("· · · ·".to_string())),
+        Some(ActiveTool::RingingBell) => (vec![Line::from("bell")], "♪".to_string()),
+        Some(ActiveTool::Listening) => (vec![Line::from("listening")], "· · · ·".to_string()),
         _ => {
             let text = app.current_say.as_deref().unwrap_or("be still").to_string();
-            let wrap_width = inner.width.saturating_sub(4) as usize;
-            (wrap_text(&text, wrap_width), None)
+            let headline = pick_big_phrase(&text);
+            (vec![Line::from(headline)], text)
         }
     };
 
-    let content_rows = focal_lines.len() as u16 + if sub_line.is_some() { 2 } else { 0 };
+    // 5×5 Quadrant glyphs fit ~6 rows tall. Centre vertically with padding.
+    let big_rows: u16 = 6;
+    let gap: u16 = 1;
+    let mirror_rows: u16 = 3.min(inner.height.saturating_sub(big_rows + gap));
+    let content_rows = big_rows + gap + mirror_rows;
     let pad_top = inner.height.saturating_sub(content_rows) / 2;
-    let pad_bottom = inner
-        .height
-        .saturating_sub(content_rows)
-        .saturating_sub(pad_top);
 
-    let mut lines: Vec<Line> = Vec::new();
-    for _ in 0..pad_top {
-        lines.push(Line::from(""));
-    }
-    for f in &focal_lines {
-        lines.push(Line::from(Span::styled(
-            f.clone(),
-            Style::default()
-                .fg(t.fg)
-                .bg(t.bg)
-                .add_modifier(Modifier::BOLD),
-        )));
-    }
-    if let Some(sub) = sub_line {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            sub,
-            Style::default().fg(t.dim).bg(t.bg),
-        )));
-    }
-    for _ in 0..pad_bottom {
-        lines.push(Line::from(""));
-    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(pad_top),
+            Constraint::Length(big_rows),
+            Constraint::Length(gap),
+            Constraint::Length(mirror_rows),
+            Constraint::Min(0),
+        ])
+        .split(inner);
 
-    let p = Paragraph::new(lines)
+    let big_text = BigText::builder()
+        .pixel_size(PixelSize::Quadrant)
+        .style(Style::default().fg(t.fg).bg(t.bg))
+        .alignment(Alignment::Center)
+        .lines(big_lines)
+        .build();
+    frame.render_widget(big_text, chunks[1]);
+
+    let wrapped = wrap_text(&mirror_text, inner.width.saturating_sub(4) as usize);
+    let mirror_lines: Vec<Line> = wrapped
+        .into_iter()
+        .map(|s| Line::from(Span::styled(s, Style::default().fg(t.fg).bg(t.bg))))
+        .collect();
+    let mirror = Paragraph::new(mirror_lines)
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true })
         .style(Style::default().bg(t.bg));
-    frame.render_widget(p, inner);
+    frame.render_widget(mirror, chunks[3]);
 }
 
 fn render_loading_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
@@ -473,24 +472,35 @@ fn render_loading_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App
         "warming the speech recogniser"
     };
 
-    let pad_top = inner.height.saturating_sub(4) / 2;
-    let mut lines: Vec<Line> = (0..pad_top).map(|_| Line::from("")).collect();
-    lines.push(Line::from(Span::styled(
-        "loading",
-        Style::default()
-            .fg(t.fg)
-            .bg(t.bg)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        stage,
-        Style::default().fg(t.dim).bg(t.bg),
-    )));
-    let p = Paragraph::new(lines)
+    let big_rows: u16 = 6;
+    let gap: u16 = 1;
+    let mirror_rows: u16 = 2;
+    let content_rows = big_rows + gap + mirror_rows;
+    let pad_top = inner.height.saturating_sub(content_rows) / 2;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(pad_top),
+            Constraint::Length(big_rows),
+            Constraint::Length(gap),
+            Constraint::Length(mirror_rows),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+
+    let big_text = BigText::builder()
+        .pixel_size(PixelSize::Quadrant)
+        .style(Style::default().fg(t.fg).bg(t.bg))
         .alignment(Alignment::Center)
-        .style(Style::default().bg(t.bg));
-    frame.render_widget(p, inner);
+        .lines(vec![Line::from("loading")])
+        .build();
+    frame.render_widget(big_text, chunks[1]);
+
+    let p = Paragraph::new(stage)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(t.dim).bg(t.bg));
+    frame.render_widget(p, chunks[3]);
 }
 
 fn render_log(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {

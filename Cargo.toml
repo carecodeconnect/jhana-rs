@@ -8,11 +8,13 @@ license = "MIT"
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
-# Note: tui-big-text was tried for "big text" rendering but its
-# unicode-quadrant glyphs render as decorative shapes (not pixels) on
-# a Linux TTY console — the font is fixed at 32×16 px per char and
-# can't be scaled. Emphasis is now achieved through whitespace +
-# centred alignment + bold instead. See src/ui.rs render_focal_card.
+# Big-text glyph rendering via unicode quadrant blocks. Works under
+# kmscon (TTF-rendered) but NOT under the in-kernel Linux framebuffer
+# console (PSF-mapped). The boot path now runs kmscon as a userspace
+# VT — see `hardware/jhana-rs-kmscon.service` and
+# `scripts/rock-kmscon-setup.sh`. 0.7.3 is the last release
+# compatible with ratatui 0.29.
+tui-big-text = "0.7.3"
 log = "0.4"
 simplelog = "0.12"
 signal-hook = "0.3"

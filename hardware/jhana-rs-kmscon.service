@@ -1,0 +1,43 @@
+[Unit]
+# kmscon-hosted variant of the meditation TUI service.
+#
+# Replaces `getty@tty1` AND the in-kernel framebuffer console with
+# `kmscon`, a userspace VT daemon that renders via DRM/KMS using
+# FreeType. That gives us proper TTF font rendering (so
+# `tui-big-text`'s unicode-quadrant glyphs work as actual scaled
+# letters instead of decorative shapes).
+#
+# Install via `scripts/rock-kmscon-setup.sh`.
+Description=jhana-rs meditation TUI (kmscon-hosted)
+After=multi-user.target sound.target
+Conflicts=getty@tty1.service kmsconvt@tty1.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/ubuntu/jhana-rs
+
+# kmscon launches the meditation binary as its login program.
+# Config lives in /etc/kmscon/kmscon.conf (installed by the setup
+# script). The --vt=1 flag binds kmscon to tty1, replacing the
+# kernel framebuffer console there. --silent suppresses kmscon's
+# own startup chatter so the meditation card is the first thing
+# the user sees.
+ExecStart=/usr/bin/kmscon --vt=1 --silent --no-switchvt -- \
+    /home/ubuntu/jhana-rs/target/release/jhana-rs
+
+# kmscon advertises itself as xterm-256color, which gives ratatui
+# 24-bit colour + cursor positioning support. The old Linux-VT
+# limits don't apply.
+Environment=TERM=xterm-256color
+
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+TTYReset=yes
+TTYVHangup=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
