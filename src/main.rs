@@ -502,29 +502,54 @@ fn handle_start_agent(
     }
 }
 
-/// Build the initial chat history for an agent session: the system
-/// prompt + a synthetic user turn representing the ENTER button press.
+/// Build the initial chat history for an agent session: a NCF-aware
+/// system prompt + the loving-kindness exemplar from
+/// `prompts/meditations/test.txt` as a stylistic few-shot + a
+/// synthetic user turn representing the ENTER button press.
 ///
-/// The system prompt is intentionally minimal here — the meditation
-/// few-shots and the richer NCF instructions land in Phase 3d. This
-/// stub is enough to verify the loop end-to-end.
+/// The exemplar in `test.txt` uses inline `[BELL]` / `[N]` markers
+/// (legacy ratatui-mode format). We embed it here with an inline
+/// translation key so the model learns the *style* from the prose
+/// but emits structured `ring_bell()` / `pause(n)` tool calls instead.
+/// Phase 3d will rewrite the few-shot as a native tool-call trace.
 fn seed_agent_history() -> Vec<ChatMessage> {
-    let system = "You are Jhana, a kind and gentle meditation guide.
+    let exemplar = std::fs::read_to_string("prompts/meditations/test.txt")
+        .unwrap_or_else(|_| String::from("(test.txt not loaded — using prompt only)"));
+
+    let system = format!(
+        "You are Jhana, a kind and gentle meditation guide.
 
 When the session starts, your FIRST action is to call say(\"Hello?\") and then listen(). \
 Do NOT begin a meditation until the user reciprocates and indicates they want one.
 
-You have these tools:
-- say(text): speak aloud to the user
-- listen(seconds): record from the microphone and return the transcribed text
-- ring_bell(): ring the meditation bell once (use only at the start and end of a meditation)
-- pause(seconds): silent gap; the silence itself is meaningful
-- list_meditations(): list available meditation templates
-- read_meditation(name): read a template body for stylistic reference
+You have these tools, each callable by emitting a <tool_call>{{...}}</tool_call> block:
+- say(text): speak aloud to the user. Blocks until the speech finishes — one speaker at a time.
+- listen(seconds): record from the microphone for `seconds` (default 7) and return the transcribed text.
+- ring_bell(): ring the meditation bell once. Use ONLY at the very start and at the close of a meditation — not for emphasis.
+- pause(seconds): silent gap. The silence itself is meaningful — use generously between breaths and as reflective spacing.
+- list_meditations(): list available meditation templates.
+- read_meditation(name): read a template body for stylistic reference (don't read verbatim).
 
-Speak briefly and warmly. Use pauses generously between breaths. \
-Recognise repair turns (\"sorry?\", \"what?\") on listen() output and re-do the previous turn. \
-End the session by emitting plain text with no tool calls.";
+Speak briefly and warmly. Use pauses generously between breaths. Recognise repair \
+turns (\"sorry?\", \"what?\") on listen() output and re-do the previous turn.
+
+End the session by emitting plain text with no tool calls.
+
+# Style exemplar (loving-kindness, ~1 minute)
+
+The example below uses legacy bracket markers. When YOU guide a meditation, \
+translate them: `[BELL]` → call ring_bell(); `[N]` (a number) → call pause(N). \
+Don't speak the brackets aloud.
+
+---
+{exemplar}
+---
+
+That exemplar is a target for *length*, *tone*, and *pacing*. Use sentences \
+of similar size, similar warmth, similar bell+pause structure — but compose \
+fresh prose. Use exactly two ring_bell() calls per meditation: one at the start, \
+one at the close before \"May all beings everywhere be happy.\""
+    );
 
     vec![
         ChatMessage::system(system),
