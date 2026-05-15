@@ -47,7 +47,7 @@
     "paroli": {
       "bin": "/home/ubuntu/paroli-build/paroli/build/paroli-cli",
       "encoder": "/home/ubuntu/models/streaming-piper-ljspeech/encoder.onnx",
-      "decoder": "/home/ubuntu/models/streaming-piper-ljspeech/decoder.onnx",
+      "decoder": "/home/ubuntu/models/streaming-piper-ljspeech/decoder.rknn",
       "config": "/home/ubuntu/models/streaming-piper-ljspeech/config.json",
       "espeak_data": "/home/ubuntu/paroli-build/piper_phonemize/share/espeak-ng-data",
       "ld_library_path": "/home/ubuntu/paroli-build/onnxruntime-linux-aarch64-1.14.1/lib:/home/ubuntu/paroli-build/piper_phonemize/lib",
