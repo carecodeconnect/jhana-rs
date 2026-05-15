@@ -46,8 +46,11 @@ const CAPTURE_FORMAT: &str = "S32_LE";
 /// produced poor results in testing.
 const CAPTURE_RATE: u32 = 48_000;
 
-/// Recording duration in seconds.
-const RECORD_SECONDS: u32 = 5;
+/// Recording duration in seconds. Bumped from 5 to 7 after user-reported
+/// "no speech detected" cases where they paused briefly after the cue
+/// finished — 5 s was just enough for a snappy reply, not enough for
+/// the typical 'um, what should I say...' meditation request.
+const RECORD_SECONDS: u32 = 7;
 
 /// Temporary WAV file for native-format mic capture (S32_LE 48 kHz).
 const RECORD_PATH: &str = "/tmp/jhana_stt.wav";
@@ -236,9 +239,6 @@ fn listen_and_transcribe(
     result_tx: &Sender<SttResult>,
     tts_tx: &Sender<crate::tts::TtsCommand>,
 ) {
-    // Signal that we're recording
-    let _ = result_tx.send(SttResult::Recording);
-
     // "Speak now" cue goes through the TTS thread so it serialises
     // with anything else the TTS is mid-speaking (no PA mixing the
     // cue on top of an in-flight sentence). Wait for the synchronous
@@ -246,6 +246,16 @@ fn listen_and_transcribe(
     let (ack_tx, ack_rx) = std::sync::mpsc::channel::<()>();
     let _ = tts_tx.send(crate::tts::TtsCommand::SpeakAndAck("Speak now.".to_string(), ack_tx));
     let _ = ack_rx.recv_timeout(std::time::Duration::from_secs(15));
+
+    // Small settle delay: paplay returns when its userspace buffer is
+    // drained, but PulseAudio / ALSA may still be pushing samples
+    // through the codec. Without this gap, the first ~1 s of the
+    // capture WAV picks up the tail of the cue from the speaker.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // NOW tell the TUI the mic is actually open so the on-screen
+    // "Listening..." matches when the user should actually speak.
+    let _ = result_tx.send(SttResult::Recording);
 
     // Record from mic via arecord
     let wav_path = PathBuf::from(RECORD_PATH);
