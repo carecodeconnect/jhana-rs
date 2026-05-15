@@ -254,6 +254,14 @@ fn run_loop(
                 LlmOutput::Pause(n) => {
                     info!("pause: {n:.0}s");
                     app.push_sentence(format!("[pause {n:.0}s]"));
+                    // Forward to TTS so the device actually goes silent
+                    // for n seconds instead of speaking "N seconds".
+                    let _ = tts_tx.send(tts::TtsCommand::Pause(n));
+                }
+                LlmOutput::Bell => {
+                    info!("bell");
+                    app.push_sentence("[bell]".to_string());
+                    let _ = tts_tx.send(tts::TtsCommand::Bell);
                 }
                 LlmOutput::Done => {
                     app.finish();

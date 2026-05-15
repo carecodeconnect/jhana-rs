@@ -50,7 +50,11 @@ pub enum LlmOutput {
     /// A complete sentence ready for display and TTS.
     Sentence(String),
     /// A pause marker: the meditation should be silent for this many seconds.
+    /// Emitted when the LLM produces `[N]` (with N a decimal number).
     Pause(f32),
+    /// Ring the meditation bell. Emitted when the LLM produces `[BELL]`.
+    /// The TTS thread plays a pre-rendered bell WAV through the speaker.
+    Bell,
     /// The LLM has finished generating.
     Done,
     /// An error occurred during streaming.
@@ -98,13 +102,20 @@ impl ChunkParser {
                 self.pause_buf.clear();
             } else if ch == ']' && self.in_pause {
                 self.in_pause = false;
-                // Parse pause duration, skip if not a valid number
-                if let Ok(duration) = self.pause_buf.trim().parse::<f32>() {
+                let token = self.pause_buf.trim();
+                // `[BELL]` (case-insensitive) → ring the meditation bell.
+                if token.eq_ignore_ascii_case("bell") {
+                    outputs.push(LlmOutput::Bell);
+                } else if let Ok(duration) = token.parse::<f32>() {
+                    // `[N]` (a number) → silent pause for N seconds.
                     // Skip leading pauses (before any sentence has been spoken)
                     if self.sentences_emitted {
                         outputs.push(LlmOutput::Pause(duration));
                     }
                 }
+                // Anything else inside brackets is silently dropped; the
+                // model occasionally emits stage directions like
+                // `[breathing in]` that we don't want to render or speak.
                 self.pause_buf.clear();
             } else if self.in_pause {
                 self.pause_buf.push(ch);

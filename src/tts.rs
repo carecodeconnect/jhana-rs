@@ -31,6 +31,12 @@ use log::{error, info};
 pub enum TtsCommand {
     /// Speak this sentence aloud.
     Speak(String),
+    /// Silent pause for this many seconds. Honoured by the TTS thread
+    /// (it sleeps) so the user actually experiences the pause instead
+    /// of hearing "fifteen seconds" spoken aloud.
+    Pause(f32),
+    /// Ring the meditation bell.
+    Bell,
     /// Stop any pending speech (flush the queue).
     #[expect(dead_code)] // will be used when cancel-generation is wired
     Stop,
@@ -60,6 +66,12 @@ const ESPEAK_RATE: &str = "145";
 
 /// Temporary WAV file for TTS output.
 const WAV_PATH: &str = "/tmp/jhana_tts.wav";
+
+/// Pre-rendered meditation-bell WAV. Generated once at TTS-thread
+/// startup via ffmpeg (a 523 Hz / C5 sine with a 2 s exponential decay)
+/// so the LLM's `[BELL]` marker can trigger an audible chime without
+/// shipping a binary asset.
+const BELL_WAV: &str = "/tmp/jhana_bell.wav";
 
 /// Start the TTS background thread.
 ///
@@ -101,14 +113,81 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
         }
     }
 
+    // Pre-render the meditation bell once. Cheap (<100 ms) but avoids
+    // re-synth on every [BELL] marker.
+    render_bell();
+
     while let Ok(cmd) = rx.recv() {
         match cmd {
             TtsCommand::Speak(sentence) => speak_sentence(&sentence),
+            TtsCommand::Pause(seconds) => {
+                let clamped = seconds.clamp(0.0, 120.0);
+                info!("TTS: pausing {clamped:.1}s");
+                std::thread::sleep(std::time::Duration::from_millis(
+                    (clamped * 1000.0) as u64,
+                ));
+            }
+            TtsCommand::Bell => {
+                info!("TTS: ring bell");
+                play_wav(BELL_WAV);
+            }
             TtsCommand::Stop => {
                 info!("TTS stop requested");
                 while rx.try_recv().is_ok() {}
             }
         }
+    }
+}
+
+/// Generate a meditation-bell WAV at startup. We mix three sine
+/// partials with separate decay envelopes to approximate a Tibetan
+/// singing-bowl-ish sound rather than a flat synth beep:
+///
+///   - Fundamental 523 Hz (C5)   — loud, slow 4 s decay
+///   - Octave     1046 Hz (C6)   — softer, 1.5 s decay (the "ping")
+///   - Just fifth  784 Hz (G5)   — middle, 2.0 s decay (warmth)
+///
+/// Idempotent: re-renders on every run (cheap, <200 ms on the Rock).
+/// Cleaner than shipping a binary asset and works on any host where
+/// ffmpeg + lavfi are installed.
+fn render_bell() {
+    let result = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f", "lavfi", "-i", "sine=frequency=523:duration=4",
+            "-f", "lavfi", "-i", "sine=frequency=1046:duration=4",
+            "-f", "lavfi", "-i", "sine=frequency=784:duration=4",
+            "-filter_complex",
+            "[0:a]volume=0.85,afade=t=out:st=0.05:d=3.9[a0];\
+             [1:a]volume=0.35,afade=t=out:st=0.02:d=1.5[a1];\
+             [2:a]volume=0.25,afade=t=out:st=0.03:d=2.0[a2];\
+             [a0][a1][a2]amix=inputs=3:duration=longest:normalize=0",
+            "-ar", "48000",
+            "-ac", "1",
+            "-sample_fmt", "s16",
+            BELL_WAV,
+        ])
+        .status();
+    match result {
+        Ok(s) if s.success() => info!("bell rendered at {BELL_WAV}"),
+        Ok(s) => error!("bell render failed: {s}"),
+        Err(e) => error!("bell render error: {e}"),
+    }
+}
+
+/// Play any pre-rendered WAV through the configured PA sink.
+fn play_wav(path: &str) {
+    match Command::new("paplay")
+        .env("PULSE_SERVER", PULSE_SERVER)
+        .args(["--device", PULSE_SINK, path])
+        .output()
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => error!("paplay failed: {}", String::from_utf8_lossy(&output.stderr)),
+        Err(e) => error!("paplay error: {e}"),
     }
 }
 
