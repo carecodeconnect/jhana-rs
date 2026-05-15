@@ -645,3 +645,124 @@ HTTP server.
 - [RKLLama](https://github.com/NotPunchnox/rkllama) — Ollama-compatible RKLLM server
 - [RK3588 NPU benchmarks](https://tinycomputers.io/posts/rockchip-rk3588-npu-benchmarks.html) — real-world perf data
 - [Radxa Rock 5A](https://radxa.com/products/rock5/5a/) — board manufacturer
+
+## Enabling and using the NPU on the Rock 5A (research log, 2026-05-15)
+
+### Working state — 3 B Llama on NPU, verified end-to-end
+
+After two boot cycles of debugging, **the 3 B Llama model loads and
+runs on the Rock 5A NPU**:
+
+| Field            | Value                                                |
+|------------------|------------------------------------------------------|
+| Driver           | RKNPU v0.9.8 (builtin, Armbian 6.1.115-vendor-rk35xx) |
+| Library          | librkllmrt.so v1.2.3                                 |
+| Model            | `Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm` (4.35 GB) |
+| Kernel cmdline   | `cma=4096M` requested → **kernel rejected → `CmaTotal: 0 kB`** (i.e. CMA disabled, NPU falls back to IOMMU page-based allocation) |
+| Load time        | **74 s** (first time, cold)                          |
+| First token      | 2.17 s after generation starts                       |
+| Decode speed     | **4.5 tok/s** — fast enough for spoken meditation pacing |
+| Sample output    | "Allow yourself to settle into the present moment, letting go of any thoughts or worries. [6] Stay here for a few moments, feeling calm and relaxed." |
+
+**Why no CMA actually worked:** with CMA disabled, `rkllm_init`
+cannot try to grab a single ~3 GB contiguous block (which is what
+failed earlier as `failed to allocate IOVA: -12`). Instead the
+rknpu driver routes through the system IOMMU page-by-page; that's
+slower to set up (hence the 74 s load) but succeeds on an 8 GB
+device once the pages are available. The IOVA fast-fail we hit
+under the default `cma=256M` was the kernel's small CMA pool
+running out at request time — it was holding back the rest of RAM
+that *could* have served the allocation.
+
+The diagnostic flow that confirmed this: bump the load timeout
+past 90 s; without it the test harness gives up while the driver
+is still mapping pages.
+
+### Reference repos and writeups
+
+These were the most useful pages found while debugging. Adding here
+so future sessions don't have to redo the searches.
+
+- **[airockchip/rknn-llm](https://github.com/airockchip/rknn-llm)** —
+  official Rockchip repo for the entire RKLLM stack: kernel-side
+  `rknpu-driver/`, userspace `librkllmrt.so`, `rkllm-toolkit`
+  model converter, per-arch example clients. **First port of call**
+  for driver/toolkit versions.
+- **[Joshua-Riek/ubuntu-rockchip](https://github.com/Joshua-Riek/ubuntu-rockchip)**
+  — Ubuntu specifically built for RK35xx with NPU patches. Worth
+  considering as an alternative base distro if Armbian drifts.
+- **[Pelochus/ezrknpu](https://github.com/Pelochus/ezrknpu)** —
+  one-script installer that pulls RKNN Toolkit 2 + RKLLM, plus
+  ezrkllm benchmarks. Useful as code and as a reference layout.
+- **[NotPunchnox/rkllama](https://github.com/NotPunchnox/rkllama)** —
+  Ollama- / OpenAI-compatible HTTP server wrapping RKLLM. Matches
+  the Pi-agent-harness architecture in `SPECS.md`; lets `pi` call
+  `/v1/chat/completions` against the NPU without us writing a
+  custom server.
+- **[Pelochus/armbian-build-rknpu-updates](https://github.com/Pelochus/armbian-build-rknpu-updates)**
+  — Armbian build patches with NPU driver bumps; useful if we
+  rebuild the kernel ourselves.
+- **[bmilde/rknpu-driver-dkms](https://github.com/bmilde/rknpu-driver-dkms)**
+  — DKMS path for the driver (WIP). Avoids full-kernel rebuild.
+- **[Adhitya Mohan — Hacking Memory Limits to Run Vision Transformers](https://amohan.dev/blog/2025/shard-optimizing-vision-transformers-edge-npu/)**
+  — reverse-engineering writeup that pushes the NPU's memory
+  ceiling. Closest writeup to our 3 B-model allocation problem.
+- **[DeepWiki: rknpu2 SRAM optimization](https://deepwiki.com/rockchip-linux/rknpu2/5.2-rk3588-sram-optimization)**
+  — device-tree SRAM partitioning for the NPU. Worth knowing when
+  chasing memory paths.
+- **[mtx512/rk3588-npu (DeepWiki)](https://deepwiki.com/mtx512/rk3588-npu)**
+  — independent reverse-engineering of the NPU ISA.
+- **[TinyComputers: RK3588 NPU benchmarks](https://tinycomputers.io/posts/rockchip-rk3588-npu-benchmarks.html)**
+  — measured perf on real models. Reports TinyLlama 1.1B at
+  10–15 tok/s on RK3588 — useful upper bound for our 3 B's 4.5 tok/s.
+- **[Armbian Forum: NPU and RKLLM support on RK3588](https://forum.armbian.com/topic/56993-npu-and-rkllm-support-on-rockchip-rk3588-nanopc-t6-and-rk3576-nanopi-m5/)**
+  — community thread; confirms exposing `/dev/rknpu` + userspace
+  libs is "out of scope of Armbian", so the community fills the gap.
+- **[Radxa forum: Rockchip NPU update 4](https://forum.radxa.com/t/rockchip-npu-update-4/21406)**
+  — Radxa-side update tracker.
+
+### Operating notes / gotchas
+
+- The previous boot's `cma=256M` configuration **always** caused
+  `rkllm_init` to fail with `failed to allocate IOVA: -12` for the
+  3 B model. Removing CMA (effectively `CmaTotal: 0`) is what makes
+  it work on this image; do NOT try to "fix" the kernel-rejected
+  `cma=4096M` by going back to a smaller value without re-verifying
+  the 3 B load. If we ever rebuild the kernel, prefer a larger
+  IOMMU domain over a larger CMA.
+- The load takes ~74 s the first time after boot; subsequent loads
+  are faster if the kernel caches still hold the model. The TUI's
+  `LlmStreamingThread` must wait at least 90 s before reporting
+  "model failed" — earlier timeouts of 30–60 s gave false negatives.
+- `npu_core_num=3` is reported by the runtime — all three RK3588
+  NPU cores are in use for decode. Expect throughput to vary with
+  background CPU load (audio capture, TUI rendering, Node frontend
+  if/when we add pi).
+
+### Plan B if a future change breaks the 3 B load
+
+Items below assume the working state above regresses (e.g. after
+a kernel update or distro swap). Lowest effort first:
+
+1. **Smaller model verify.** Switch `~/models/` to a 1 B `.rkllm`
+   (Llama-3.2-1B, Qwen3-1.7B, TinyLlama 1.1B) from
+   [jamescallander/rk3588-rkllm-models](https://huggingface.co/collections/jamescallander/rk3588-rkllm-models)
+   or [c01zaut](https://huggingface.co/c01zaut). Confirms the rest
+   of the stack still works and isolates the 3 B-only issue.
+2. **CMA value sweep.** Try `cma=` values the kernel actually
+   accepts (`512M`, `1024M`, `2G`, etc. — use the `G` suffix; our
+   `4096M` was silently dropped). Check `/proc/meminfo CmaTotal`
+   after each reboot. Stop at the largest accepted value.
+3. **rkllama HTTP server** instead of direct rkllm-rs linking.
+   Often manages NPU state more robustly than a minimal client
+   and pairs with the Pi agent harness (preferred over distro swap
+   per user preference 2026-05-15: "rkllama is quicker if 1 and 2
+   fail").
+4. **Switch to Joshua-Riek's Ubuntu image** for tested NPU defaults.
+5. **Rebuild Armbian kernel** with adjusted DMA / IOMMU config,
+   using `Pelochus/armbian-build-rknpu-updates` as a starting
+   point. Most invasive — only if 1–4 don't move us forward.
+
+Diagnostic flow for any of these: `scripts/rock-test-npu.sh`
+(six-stage check: driver, IOMMU, memory, libs, RKNN smoke, RKLLM
+5-min load).
