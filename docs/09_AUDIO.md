@@ -23,9 +23,49 @@ reverse-engineered `snd-soc-uctronics-codec.ko` module.
      identified.
 
   Until this is understood, **boost loudness in software** — e.g.
-  `ffmpeg -af "volume=10dB,alimiter=limit=0.95" …` on speech WAVs
-  before `aplay`. The `scripts/test-stt-tts.sh` start/stop cues need
-  this treatment to be clearly audible.
+  `ffmpeg -af "volume=20dB,alimiter=limit=0.95" …` on cue/speech WAVs
+  before `aplay`. The `scripts/test-stt-tts.sh` start/stop cues now
+  use this and a 1500 Hz / 700 Hz pair, which the user reports as
+  clearly loud. **Cue frequency matters a lot**: the small onboard
+  speaker is heavily peaked around 1–2 kHz, so a 440 Hz tone is
+  almost inaudible at the same digital amplitude while a 1500 Hz
+  tone is loud. Keep TTS / cues in that band.
+
+### Reference: the original AI in a Box loudness path
+
+We cloned the upstream `usefulsensors/ai_in_a_box` repo to
+`/mnt/data/projects/ai_in_a_box` on the dev machine for reference.
+Its `configure_devices.sh` reveals how the original device gets
+its perceived loudness:
+
+```bash
+amixer -c 2 sset DAC 100%                     # codec gain to max (= our gain=4)
+pactl set-sink-volume $DEFAULT_SINK_INDEX 0xFFFF   # PulseAudio sink volume to ~100%
+```
+
+Combined with the per-app `volume.conf` (default `8` in
+`volume_file.py`) and PulseAudio's loudness-normalisation behaviour,
+the path picks up an effective software-gain stage that raw
+`aplay` does not have. Two ways to replicate:
+
+1. Install PulseAudio and route playback through a default sink at
+   100% (closest to baseline).
+2. Apply our own ffmpeg `volume + alimiter` stage in `src/tts.rs`
+   and `scripts/test-stt-tts.sh` before handing the WAV to `aplay`
+   (simpler, no daemon, current choice).
+
+Other implementation details from the reference repo worth
+mirroring in jhana-rs:
+
+- `recorder.py` sets `sd.default.dtype = 'int32', 'int32'` for both
+  input and output streams — this is exactly the S32_LE we found is
+  required for the I2S codec on capture. The output stream then
+  overrides to `dtype="int16"` per-stream in `tts.py`.
+- The mic input stream is opened *before* the TTS output stream and
+  signals readiness via `/tmp/audio_input_running.bool`; TTS waits
+  on that file. The codec has an input-before-output ordering
+  requirement we should honour in `src/main.rs` once we wire TTS
+  back up.
 
 - **GPIO bank correction (2026-05-15):** the overlay used `&gpio3`
   for `sdmode-gpios` / `gainsel_*-gpios` for several iterations

@@ -26,14 +26,24 @@ PIPER_MODEL=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medi
 PIPER_CONFIG=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx.json
 
 echo "==> Generating start/stop beeps with ffmpeg..."
-# "Start": rising 600 Hz tone, 0.7 s.
+# The onboard Uctronics speaker has a physical loudness ceiling that the
+# 3-bit codec gain selector barely budges. The original AI in a Box gets
+# its perceived loudness from PulseAudio (`pactl set-sink-volume 0xFFFF`)
+# which combines software gain + soft-clipping. We approximate that here
+# with `volume=20dB,alimiter` — the limiter compresses peaks so the
+# average power rises even though the peak is already at 0 dBFS, which
+# the small speaker hears as "louder". Sounds best around 1–2 kHz (the
+# speaker's response peak); 440 Hz comes through much quieter.
+LOUD='volume=20dB,alimiter=limit=0.95'
+
+# "Start": 1500 Hz, 0.4 s — short and high so it's hard to miss.
 ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=880:duration=0.7" \
-  -ar 48000 -ac 1 -sample_fmt s16 "$BEEP_START"
-# "Stop": lower 440 Hz tone, 0.7 s.
+  -f lavfi -i "sine=frequency=1500:duration=0.4" \
+  -af "$LOUD" -ar 48000 -ac 1 -sample_fmt s16 "$BEEP_START"
+# "Stop": 700 Hz, 0.6 s — lower so it's distinguishable from start.
 ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=440:duration=0.7" \
-  -ar 48000 -ac 1 -sample_fmt s16 "$BEEP_STOP"
+  -f lavfi -i "sine=frequency=700:duration=0.6" \
+  -af "$LOUD" -ar 48000 -ac 1 -sample_fmt s16 "$BEEP_STOP"
 
 echo
 echo "Get ready — beep coming in 2 seconds..."
