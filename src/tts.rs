@@ -194,17 +194,35 @@ fn spawn_moonshine_worker() {
     };
 
     info!("starting Moonshine worker (voice={})", cfg.voice);
+    // jhana-rs.service runs as root, but the moonshine-voice assets
+    // are cached under /home/ubuntu/.cache (where we did the pip
+    // install + voice download). Without HOME override, the worker
+    // silently re-downloads into /root/.cache and the TTS thread
+    // blocks on the ready handshake. Pin HOME to the install user.
     let mut child = match Command::new(&cfg.python)
         .args([
+            "-u", // unbuffered stdout — without this Python block-buffers
+            // when stdout is a pipe, so our ready-line handshake never
+            // arrives and the TTS thread hangs forever.
             &cfg.script,
             "--voice",
             &cfg.voice,
             "--language",
             &cfg.language,
         ])
+        .env("HOME", "/home/ubuntu")
+        .env("XDG_CACHE_HOME", "/home/ubuntu/.cache")
+        .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Capture stderr to a file so silent crashes leave evidence.
+        // The path is constant so subsequent worker spawns overwrite
+        // it; tail it with `tail -f /tmp/moonshine_worker.err`.
+        .stderr(
+            std::fs::File::create("/tmp/moonshine_worker.err")
+                .map(Stdio::from)
+                .unwrap_or_else(|_| Stdio::null()),
+        )
         .spawn()
     {
         Ok(c) => c,
