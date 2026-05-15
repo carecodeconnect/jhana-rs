@@ -88,22 +88,39 @@ separate service, (d) tool/function-call routing for skills,
 overhead — the meditation experience can't tolerate seconds of
 agent-side latency on top of LLM tok/s.
 
-| Harness                                                            | Language | Embed model      | Tool calls         | RAG/memory        | aarch64-ready | Fit for jhana-rs                                                                 |
-|--------------------------------------------------------------------|----------|------------------|--------------------|-------------------|---------------|----------------------------------------------------------------------------------|
-| **`/mnt/projects/pi`** (local internal harness)                    | TBD      | unknown          | yes (skills)       | TBD               | likely        | Top contender if it stays small and Rust-callable; primary integration target.   |
-| **Rig** — <https://www.rig.rs/>                                    | Rust     | library          | yes                | vector stores     | yes           | Strong fit: pure-Rust crate, OpenAI-compatible, can target any local server.     |
-| **Flue** — <https://github.com/withastro/flue>                     | JS/TS    | Node runtime     | yes                | varies            | yes (Node)    | Adds Node to the device; OK for a sidecar but not single-binary.                 |
-| **LangChain** / **LangGraph** (langchain-ai)                       | Python   | library/runtime  | mature             | mature            | yes           | Powerful but pulls Python + heavy deps; only worth it if other Python is on-box. |
-| **swiftide** — <https://github.com/bosun-ai/swiftide>              | Rust     | library          | yes                | vector + indexers | yes           | Tilted toward RAG/indexing pipelines; useful for the template archive.           |
-| **Direct rkllm-rs + custom tool router** (status quo + skills)     | Rust     | library          | hand-rolled        | hand-rolled       | yes           | Lowest dependency surface; most code to write ourselves.                         |
+| Harness                                                            | Language | Embed model         | Tool calls         | RAG/memory          | aarch64-ready | Fit for jhana-rs                                                                                          |
+|--------------------------------------------------------------------|----------|---------------------|--------------------|---------------------|---------------|-----------------------------------------------------------------------------------------------------------|
+| **`/mnt/data/projects/pi`** ([earendil-works/pi-mono](https://github.com/earendil-works/pi-mono)) | TS / Node | external Node + HTTP | yes (skills, MCP-ish) | TBD             | yes (Node)    | User-tested already (on M1 Max in `pi_sandbox`); adds Node runtime to the cyberbox.                       |
+| **Rig** — <https://www.rig.rs/>                                    | Rust     | library             | yes                | vector stores       | yes           | Strong fit: pure-Rust crate, OpenAI-compatible, can target any local server.                              |
+| **Goose** — [block/goose](https://github.com/block/goose) (Rust 49% + TS 45%) | Rust + TS desktop | external server with desktop client | yes (via **MCP**, 70+ extensions; 15+ LLM providers incl. Ollama) | via MCP extensions  | yes (Rust core) | Heavier than what we need but MCP-as-tool-protocol is portable. Stand up rkllm-rs behind an Ollama-compatible endpoint and Goose talks to it natively. Best fit if we want a ready-made multi-extension agent. |
+| **Kalosm / Floneum** — [floneum/floneum](https://github.com/floneum/floneum) (kalosm-0.4 Feb 2025) | Rust + Candle | library | **not first-class** (more of a primitives lib than an agent runtime) | basic embeddings   | yes (CUDA / Metal docs; pure-Rust Candle so aarch64 builds) | Useful for understanding Candle-async streaming; not a replacement for our pipeline. Floneum is the node-graph editor above kalosm — overkill for a fixed meditation flow. |
+| **Flue** — <https://github.com/withastro/flue>                     | JS/TS    | Node runtime        | yes                | varies              | yes (Node)    | Adds Node to the device; OK for a sidecar but not single-binary.                                          |
+| **LangChain / LangGraph** (langchain-ai)                           | Python   | library / runtime   | mature             | mature              | yes           | Powerful but pulls Python + heavy deps; only worth it if other Python is on-box.                          |
+| **swiftide** — <https://github.com/bosun-ai/swiftide>              | Rust     | library             | yes                | vector + indexers   | yes           | Tilted toward RAG/indexing pipelines; useful for the template archive.                                    |
+| **Direct rkllm-rs + custom tool router** (status quo + skills)     | Rust     | library             | hand-rolled        | hand-rolled         | yes           | Lowest dependency surface; most code to write ourselves.                                                  |
+| **Bespoke ratatui + tokio + rkllm-rs** (handroll the whole agent)  | Rust     | nothing — it's the app | hand-rolled        | hand-rolled         | yes           | Maximum control + single binary; we already have all the inference pieces (`rkllm-rs`, `sensevoice-rs`, ratatui). Cribbing from Vox/Feros (see "Existing Rust voice-agent frameworks" above) gets us 80% of the design. |
 
 Notes:
 
 - The **status-quo path** is to keep `src/llm.rs` (rkllm-rs) and add a
   small Rust skills router (a function-calling layer + a template
-  retriever over a local jhana corpus). This is the simplest delta
-  from where jhana-rs is today.
-- **Rig** is the most natural step up — it's a Rust crate, hits any
+  retriever over a local jhana corpus). Simplest delta from today.
+- **Bespoke ratatui + tokio** sits one step above status-quo: keep
+  full control, but borrow the trait surface from `Vox` and the
+  tokio orchestration shape from `Feros` so we don't reinvent
+  microsecond-counting.
+- **Kalosm** is appealing in that it's pure Rust on `Candle`, but
+  its surface is "primitives + examples" rather than an agent
+  framework. It also has no native TTS and no first-class tool-
+  calling abstractions yet. We'd write the same orchestration
+  on top of it; not a win over status-quo + Vox-inspired pipeline.
+- **Goose** is the heaviest Rust option but the most extensible:
+  agent loop, MCP extensions ecosystem, multi-provider local LLM.
+  If we ever want plug-in skills written by others (a "meditation
+  skill", "breath-tracking skill", etc.) without us recompiling,
+  Goose-via-MCP is the natural shape — we'd wrap rkllm-rs behind
+  an Ollama-compatible HTTP endpoint and let Goose drive.
+- **Rig** is the most natural mid-step — it's a Rust crate, hits any
   OpenAI-compatible endpoint (we can stand up `rkllama` or wrap
   rkllm-rs behind a thin local HTTP shim), and brings a tool-call
   abstraction without giving up the single-binary deployment.
