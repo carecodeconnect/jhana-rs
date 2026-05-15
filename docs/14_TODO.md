@@ -101,6 +101,60 @@ Performance numbers live in [11_BENCHMARKS.md](11_BENCHMARKS.md).
   `listen()` response is more than a brief acknowledgement, the agent
   should open the inquiry sequence (Crane et al., above) BEFORE closing,
   not after.
+- [ ] **Always-on mic + live captioning (next implementation cycle).**
+  Three related features that share one infrastructure layer — a
+  continuous mic-capture thread with VAD-gated chunked SenseVoice
+  transcription. Estimated effort: 1-2 days for the foundation +
+  ½ day per feature. Tasks #22 / #26 / #27 in the in-session
+  tracker; consolidated here so they survive across sessions.
+
+  **Shared foundation: `mic_monitor` thread.**
+  - Continuous `arecord -D pulse` reading short chunks (e.g. 500 ms)
+    into a ring buffer.
+  - Silero VAD (already a `sensevoice-rs` dep) over the chunks; gate
+    transcription on sustained voice activity.
+  - On VAD-detected speech, accumulate chunks into a phrase buffer
+    and run SenseVoice incrementally (or batch every 1-2 seconds).
+  - Emit `MicEvent::SpeechStart` / `MicEvent::Partial(text)` /
+    `MicEvent::Final(text)` events to a `Sender<MicEvent>`.
+  - This thread runs from app startup, NOT just during `listen()`.
+
+  **Feature A — live captioning in the USER pane** (task #26).
+  Subscribe the Slint Timer to `MicEvent::Partial` and push partials
+  to a new `live_transcript: string` property. The USER pane shows
+  the partial as it grows. On `Final`, append a committed line to
+  `user_lines[]` and clear `live_transcript`. Matches the original
+  ai-in-a-box's pygame captioning service.
+
+  **Feature B — `listen()` becomes a thin reader** (task #26 cont'd).
+  Current `dispatch_tool::Listen` does its own `arecord` + STT. After
+  the foundation lands, it just waits for the next `MicEvent::Final`
+  from the mic_monitor and returns that transcript. Simpler dispatch,
+  no exclusive mic ownership.
+
+  **Feature C — listen while thinking** (task #27). While the LLM is
+  generating the next turn (10-30 s of dead time), the mic_monitor is
+  still running; if `MicEvent::Final` fires during generation, queue
+  it. At the next tool-call boundary, if a queued transcript exists,
+  inject it as a synthetic `listen()` result so the agent can react
+  to what the user said while the model was thinking.
+
+  **Feature D — TTS barge-in** (task #22). The hardest of the four
+  because it requires *interrupting* paroli mid-playback. Add a
+  `TtsCommand::Cancel` that kills the in-flight paplay process and
+  drains the queue. On `MicEvent::SpeechStart` *while* `active_tool
+  == "speaking"`, send Cancel + queue the upcoming `Final` as a
+  barge-in. Agent picks it up at the next turn boundary, treats it
+  as a high-priority listen result, and responds. Real CA-grade
+  turn-taking: "the listener can take the floor at any time."
+
+  **Feature E — backchanneling** (task #22 cont'd, polish). Short
+  ("mm", "yeah", "I'm here") TTS fragments emitted during long
+  user utterances to show active listening. Cheaper than barge-in.
+  Implementation: on `MicEvent::Partial` longer than N words while
+  agent is idle, sample a brief continuer phrase and send via
+  `TtsCommand::Speak`. paroli's RTF 0.29 makes the latency tolerable.
+
 - [ ] **Real turn-taking infrastructure** (Sacks, Schegloff, Jefferson,
   *"A Simplest Systematics for the Organization of Turn-Taking for
   Conversation"*, 1974, *Language* 50:696–735). The prompt-level
