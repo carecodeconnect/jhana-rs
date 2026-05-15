@@ -7,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 "$SCRIPT_DIR/rock-ssh.sh" "
   sudo bash -c '
     pkill jhana-rs 2>/dev/null; true
+    # Stop getty@tty1 so it does not redraw a login prompt over the TUI.
+    # restore_console() in src/main.rs will start it again on exit.
+    systemctl stop getty@tty1.service 2>/dev/null; true
     dmesg --console-off
     echo -e \"\033c\" > /dev/tty1
     cd /home/ubuntu/jhana-rs && TERM=linux setsid ./target/debug/jhana-rs </dev/tty1 >/dev/tty1 2>/dev/tty1 &

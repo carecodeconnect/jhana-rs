@@ -86,9 +86,99 @@ Notes:
   jhana-mistral training data) into a local vector store the agent
   can retrieve from — we may use it under whichever harness we pick.
 
-Decision is deferred until the `/mnt/projects/pi` interface is more
-concrete; until then jhana-rs continues to be implemented as a
-hand-rolled Rust pipeline.
+### Pi adaptation plan (2026-05-15, after looking at the actual repos)
+
+`pi` lives locally at `/mnt/data/projects/pi`
+([earendil-works/pi-mono](https://github.com/earendil-works/pi-mono)). It
+is a TypeScript/Node monorepo with several useful packages:
+
+- `@earendil-works/pi-agent-core` — agent runtime with tool calling and
+  state management
+- `@earendil-works/pi-coding-agent` — interactive CLI built on it
+- `@earendil-works/pi-ai` — unified multi-provider LLM API (OpenAI,
+  Anthropic, Google, anything OpenAI-compatible)
+- `@earendil-works/pi-tui` — differential-rendering terminal UI library
+  with bracketed paste, image rendering, autocomplete
+
+`/mnt/data/projects/pi_sandbox` is a tested setup that runs pi against a
+local OpenAI-compatible server (llama.cpp) on Apple M1 Max with
+Qwen3-Coder 30B / 80B and gpt-oss-20b. Decode at 50–60 tok/s on M1 Max.
+
+#### Proposed Rock architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          Rock 5A                                │
+│                                                                 │
+│  ┌────────────────┐    HTTP /v1/...    ┌────────────────────┐   │
+│  │ pi (Node TUI)  │ ─────────────────▶ │ jhana-rs-server    │   │
+│  │ on tty1        │ ◀───────────────── │ (Rust, single bin) │   │
+│  │ - agent loop   │   tool calls       │ - rkllm-rs (NPU)   │   │
+│  │ - skills/tools │                    │ - sensevoice-rs    │   │
+│  │ - meditation   │                    │ - piper-rs (later) │   │
+│  │   templates    │                    │ - ALSA capture/    │   │
+│  └────────────────┘                    │   playback         │   │
+│         ▲                              └────────────────────┘   │
+│         │ DSI display                            ▲              │
+│         │ keyboard / hardware buttons            │ I2S          │
+│         ▼                                        ▼              │
+│   ┌─────────────┐                       ┌────────────────┐      │
+│   │ tty1 + xx16 │                       │ Uctronics      │      │
+│   │ Terminus    │                       │ mic + speaker  │      │
+│   │ font        │                       │ (codec card 1) │      │
+│   └─────────────┘                       └────────────────┘      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The Rust binary becomes an **HTTP service** instead of a TUI app:
+- `POST /v1/chat/completions` — OpenAI-compatible, backed by rkllm-rs
+  on the NPU. This is what `pi` already speaks.
+- `POST /v1/audio/transcriptions` — OpenAI-shape STT endpoint. Pi calls
+  it as a tool; server records from `plughw:1,0` S32_LE 48 kHz,
+  resamples to 16 kHz S16 for SenseVoice, returns the transcript.
+- `POST /v1/audio/speech` — OpenAI-shape TTS endpoint. Body is text;
+  server synthesises with espeak-ng (baseline) → piper-rs (next) →
+  piper-rknn-rs (NPU); plays through `plughw:1,0`.
+- Custom skill endpoints / templates served from a directory the
+  agent can read via tool calls (e.g. `GET /v1/templates/{type}`).
+
+Pi's frontend uses `pi-tui` to render the meditation session on tty1,
+swap to a different chapter via slash commands, etc. The agent's tool
+catalog includes `transcribe`, `speak`, `list_templates`, `select
+template`, `run_meditation_segment`, `wait(seconds)`.
+
+#### Concrete next steps
+
+1. **Replace Ratatui main loop with an HTTP server** in jhana-rs.
+   Reuse `src/llm.rs` (rkllm-rs), `src/stt.rs`, `src/tts.rs` behind
+   axum / hyper routes. Keep the binary single-file.
+2. **Install Node 20 on the Rock** (~50 MB), clone pi-mono, build the
+   coding-agent — or write a small jhana-specific harness on top of
+   `pi-agent-core` + `pi-tui` that knows about meditation templates.
+3. **Pick a smaller LLM** in `.rkllm` format that fits 8 GB RAM with
+   headroom for the Node process: Llama-3.2-3B (already on device,
+   4.35 GB) or Qwen3-1.7B (~1.1 GB) for faster decode. The
+   M1-Max-tested Qwen3-Coder 30B will not fit.
+4. **Author 3–5 jhana templates** as on-device markdown/YAML the
+   agent retrieves through a tool call. Mirror the existing
+   `src/prompts/*.md` corpus.
+5. Move `src/main.rs` from a Ratatui TUI to an HTTP entry point;
+   keep the old TUI binary available as `bin/jhana-rs-tui` for
+   offline/diagnostic use and to test the Rust pipeline in isolation
+   without Node.
+
+#### Trade-offs
+
+| Question                                  | Answer                                                                                                     |
+|-------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| Does this match "Rust on the Rock"?       | Inference + audio stay Rust. The agent/UI layer becomes Node — a deliberate exception for the harness only.|
+| Cyberbox / single-binary aesthetic?       | Compromised — Node adds ~50 MB and a process. The Rust HTTP service is still single-binary; pi is the second process. |
+| Latency cost vs current direct-link Rust? | One extra HTTP hop per tool call (~ms locally). Negligible vs LLM tok/s.                                   |
+| What if pi has unfixable bugs?            | We keep the `bin/jhana-rs-tui` Ratatui binary as the always-working fallback.                              |
+
+This is a meaningful detour. Worth doing once the Rust pipeline
+(STT + LLM + TTS + display + hardware buttons) is fully working and
+stable end-to-end so the pi adaptation is a layer, not a rewrite.
 
 ### Interaction design: Moore's Natural Conversation Framework
 
@@ -264,6 +354,167 @@ TTS audio playback through the speaker.
 ---
 
 ## 3. Component Details
+
+### Model selection for the Rock (2026-05-15, derived from pi_sandbox)
+
+The pi_sandbox project tested coding-agent-grade models on a 64 GB M1
+Max (`/mnt/data/projects/pi_sandbox/docs/02-models.md`). Key lessons
+that transfer to the Rock:
+
+1. **MoE with low active params wins on memory-bandwidth-bound
+   hardware.** Apple Silicon and the RK3588 both have one shared memory
+   bus; "active params" sets the decode-tok/s ceiling more than total
+   params. The Rock's bandwidth ceiling is even tighter than the M1.
+2. **Dense ≥ ~20 B is bandwidth-death.** On M1 Max, Devstral-Small-24B
+   ran at 11 tok/s (vs Qwen-30B-A3B at 51). For the Rock the equivalent
+   threshold is much lower — anything dense above ~4 B is going to
+   crawl.
+3. **Structured tool-call training is non-negotiable** for the agent
+   harness path (Pi calls tools via `<tool_call>` envelopes; older
+   models like DeepSeek-Coder-V2-Lite, CodeLlama, StarCoder-2 silently
+   fail). Verify the model's chat-template emits `<tool_call>` blocks
+   before adopting it. Anything trained pre-mid-2024 is suspect.
+4. **Choose by active params, then by tool-call quality.** Quant
+   choices are secondary; for the Rock, w8a8 (the RKLLM default) is
+   the only practical format anyway.
+
+#### Direct port of pi_sandbox's tier list to the Rock
+
+The Rock's working set is ~6 GB after OS + audio pipeline + (eventual)
+Node frontend. RKLLM only supports a small, hand-converted set of
+models. The candidates that survive:
+
+| Model                            | Active / Total | Quant     | On-device size | Status on Rock                                                                                              |
+|----------------------------------|---------------:|-----------|---------------:|-------------------------------------------------------------------------------------------------------------|
+| **Llama-3.2-3B-Instruct**        |     3 B (dense) | w8a8 g128 |      **4.35 GB** | Already on device at `~/models/Llama-3.2-3B-Instruct_w8a8_g128_rk3588.rkllm`. Tool-call trained.            |
+| **Llama-3.2-1B-Instruct**        |     1 B (dense) | w8a8      |      ~1.0 GB    | Has RKLLM conversions on HF (jamescallander/c01zaut). Worth testing for decode-speed gains.                 |
+| **Qwen2.5-3B-Instruct**          |     3 B (dense) | w8a8      |      ~3.5 GB    | Pre-converted by [jamescallander](https://huggingface.co/jamescallander) per `docs/TODO.md`. Tool-call OK.  |
+| **Qwen3-1.7B**                   |     1.7 B (dense) | w8a8     |      ~1.7 GB    | Newest Qwen3 small model. RKLLM conversion availability TBD; if conversion exists this is the top pick.     |
+| **Gemma-3-4B**                   |     4 B (dense) | w8a8      |      ~4.5 GB    | Pre-converted, mentioned in TODO.md. Gemma 3 has tool-call training.                                        |
+| **Phi-3-mini-3.8B**              |     3.8 B (dense) | w8a8     |      ~4 GB     | Mature, well-supported. RKLLM conversion availability TBD.                                                  |
+
+Rejected for the Rock (following pi_sandbox's logic, downsized):
+
+- **gpt-oss-20b** (11 GB MXFP4) — too big; would saturate RAM and the
+  NPU doesn't speak MXFP4 anyway.
+- **Qwen3-Coder-30B / 80B**, **GLM-4.5-Air** — 21+ GB, completely out.
+- **DeepSeek-Coder-V2-Lite** — even if converted, fails the tool-call
+  template check (see pi_sandbox doc).
+- **Anything dense ≥ ~6 B** — Devstral-style bandwidth death on RK3588;
+  decode would be unusable for spoken meditation pacing.
+
+#### Why no MoE in the Rock list
+
+MoE models pass through *all* expert weights via memory even though only
+a small fraction is computed per token. On the M1 Max with 64 GB RAM
+this is fine. On the Rock with 8 GB and the RKLLM runtime (which
+currently lacks production MoE support), there is no MoE candidate
+small enough to fit. The Rock list is therefore all dense, capped at
+~4 B to stay within bandwidth budget.
+
+#### Recommended trial order
+
+1. **Baseline what we have:** keep Llama-3.2-3B as the production model
+   for now. Generate one meditation, measure decode tok/s and time-to-
+   first-sentence. Decide if we need to go smaller for latency or
+   bigger for quality.
+2. **Test Llama-3.2-1B** for decode-speed wins; quality may be too thin
+   for natural meditation guidance but worth measuring.
+3. **Run pi_sandbox's `tool-call-test` equivalent** against the chosen
+   model — emit `<tool_call>` to a stub `wait`, `speak_segment`,
+   `transition_phase` tool catalog. If the model can't speak tool
+   calls cleanly, we won't get the agent harness to work; stay on
+   hand-rolled state machine.
+4. **Watch for Qwen3-1.7B / Phi-3-mini RKLLM conversions** —
+   small + modern + tool-call-trained = our top of the upgrade
+   curve. The pi_sandbox "tested and rejected" list is the model
+   to consult before pulling in any new conversion.
+
+#### Sources beyond pi_sandbox
+
+- **[Rockchip RKLLM model zoo](https://huggingface.co/c01zaut)** —
+  c01zaut's HF page is the de-facto repo for RK3588-quantised LLMs in
+  `.rkllm` format. Sort by recent uploads to find current tool-call
+  trained variants.
+- **[jamescallander RK3588 collection](https://huggingface.co/collections/jamescallander/rk3588-rkllm-models)**
+  — also maintains a Qwen2.5 + Llama 3.2 conversion set; mentioned
+  in `docs/TODO.md`.
+- **[Are We Learning Yet?](https://www.arewelearningyet.com/)** — Rust
+  ML ecosystem tracker; useful when picking a Rust-side inference
+  crate to pair with the model.
+
+### Mistral / Ministral / Mixtral fit (2026-05-15)
+
+The Mistral family is the user's preferred lineage; the question is
+which member fits the Rock and speaks pi's tool-call envelope.
+
+| Model                             | Params           | Format     | Tool calls?                              | Fits 8 GB Rock? | Inference path                              |
+|-----------------------------------|------------------|------------|------------------------------------------|-----------------|---------------------------------------------|
+| **Ministral-3B-Instruct**         |    3 B (dense)   | GGUF / .rkllm if converted | Yes — Ministral series is post-2024, tool-call trained | Yes — Q4_K_M ~2 GB on disk | **Best fit.** Already on device as `~/models/Ministral-3B-Instruct-Q4_K_M.gguf`. Currently runnable via mistral.rs (CPU). Watch HF for an `.rkllm` conversion to move to the NPU. |
+| **Ministral-8B-Instruct**         |    8 B (dense)   | GGUF       | Yes                                      | Q4 ~5 GB — borderline | CPU only on Rock; dense 8 B will be bandwidth-bound. Skip unless we ever cross to a larger SoC. |
+| **Mistral-7B-Instruct-v0.3**      |    7 B (dense)   | GGUF       | Yes (v0.3 has function-calling)          | Q4 ~4 GB — fits | CPU only; ~2 tok/s expected on Rock. Pre-Ministral, slightly older tuning. |
+| **Mistral-7B-Instruct v0.1/v0.2** |    7 B (dense)   | GGUF       | **No** — predates structured tool calls   | Fits             | Rejected; same failure mode as DeepSeek-Coder-V2-Lite in pi_sandbox. |
+| **Mixtral 8×7B**                  |   12.9 B active / 47 B total | GGUF | Yes                                | **No** — ~26 GB at Q4 | Out of range for an 8 GB Rock. |
+| **Mixtral 8×22B**                 |   39 B active    | GGUF       | Yes                                      | **No** — ~80 GB at Q4 | Out of range. |
+| **Mistral-Small / Mistral-Nemo-12B** | 12 B dense   | GGUF       | Yes                                      | **No** — Q4 ~7 GB + KV cache | Borderline; CPU only would be unusably slow. |
+
+#### Inference engine choice for the Mistral family
+
+Mistral models ship primarily as **GGUF** (llama.cpp ecosystem). There
+is no native `.rkllm` conversion for Mistral/Ministral as of 2026-05
+— RKLLM's converter targets a small allowlist (Llama, Qwen, Gemma,
+Phi, RWKV, etc.). To use a Mistral model on the Rock the realistic
+paths are:
+
+1. **`mistralrs` (Rust)** — pure Rust LLM inference engine, supports
+   GGUF, runs on CPU. The current jhana-rs `src/llm.rs` already used
+   `mistral.rs` once (HTTP variant); we ripped that out for `rkllm-rs`
+   NPU inference. Re-adding mistralrs as an alternative backend is
+   the easiest Rust-native way to run Ministral-3B. Expect ~3–5 tok/s
+   on RK3588 A76 cores for a 3 B Q4 model.
+2. **`llama.cpp` via `llama-server`** — pi-sandbox's tested stack.
+   Mature, OpenAI-API-compatible HTTP, supports all GGUF Mistral
+   variants. Speed on RK3588: similar to mistralrs (~3–5 tok/s for
+   3 B Q4). Bigger codebase, C++ build, but it's the most
+   battle-tested. Useful if we move to the pi harness front-end
+   anyway since pi already talks to llama-server.
+3. **`mistral.rs` via HTTP** — Rust-native, OpenAI-compatible. Same
+   bind point for pi as llama-server.
+4. **Wait for RKLLM Mistral support** — Rockchip's converter would
+   need to add the Mistral architecture. No firm timeline.
+
+#### Recommendation
+
+- **Short term:** keep Llama-3.2-3B on the NPU via rkllm-rs as the
+  default — it's the fastest path on the Rock (NPU >> CPU for LLM
+  decode). Tool-call quality is comparable to Ministral.
+- **If/when we adopt the pi harness:** stand up `llama-server` on the
+  Rock with **Ministral-3B-Instruct-Q4_K_M.gguf** (already on disk)
+  as a second LLM backend. Pi can target either — `llama-server` for
+  Ministral on CPU, or our Rust HTTP shim around rkllm-rs for the
+  NPU Llama. Measure tok/s and tool-call cleanness; switch defaults
+  per the result.
+- **Long term:** push for an `.rkllm` conversion of Ministral-3B (or
+  a successor) so we can have user-preferred lineage + NPU speed in
+  one package.
+
+#### Tool-call compatibility with pi (gating requirement)
+
+Pi expects the standard OpenAI `<tool_call>` envelope in the model's
+chat-template. The pi_sandbox doc's pre-flight checks
+(`tool-call-test`) catch failures cheaply. Before adopting *any*
+model on the Rock:
+
+1. Boot `llama-server` (or our shim) with the candidate model.
+2. Issue an OpenAI `tools=[...]` request that demands a tool call
+   (e.g. "what time is it?" with a `get_time` tool).
+3. Verify the response contains a structured `tool_calls` array,
+   not freeform text that *describes* calling a tool.
+
+This screening is non-negotiable per pi_sandbox's experience with
+DeepSeek-Coder-V2-Lite, CodeLlama, and similar models that look
+right on paper but emit text-only suggestions when asked to call a
+tool.
 
 ### 3.1 LLM
 

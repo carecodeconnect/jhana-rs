@@ -47,8 +47,12 @@ const CAPTURE_RATE: u32 = 48_000;
 /// Recording duration in seconds.
 const RECORD_SECONDS: u32 = 5;
 
-/// Temporary WAV file for mic capture.
+/// Temporary WAV file for native-format mic capture (S32_LE 48 kHz).
 const RECORD_PATH: &str = "/tmp/jhana_stt.wav";
+
+/// Resampled WAV passed to SenseVoice (S16_LE 16 kHz mono — the model
+/// only accepts 8 or 16 kHz).
+const RESAMPLED_PATH: &str = "/tmp/jhana_stt_16k.wav";
 
 /// Commands sent to the STT thread.
 #[derive(Debug)]
@@ -183,12 +187,50 @@ fn listen_and_transcribe(svs: &SenseVoiceSmall, result_tx: &Sender<SttResult>) {
         }
     }
 
+    // Resample to S16_LE 16 kHz mono for SenseVoice (it rejects anything
+    // other than 8 or 16 kHz). We capture at S32_LE 48 kHz natively because
+    // that's the only format the Uctronics I2S codec returns usable data in
+    // (S16_LE direct from plughw gives DC-offset garbage — see docs/09_AUDIO.md).
+    let resampled_path = PathBuf::from(RESAMPLED_PATH);
+    let ffmpeg_status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            wav_path.to_str().unwrap(),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-sample_fmt",
+            "s16",
+            resampled_path.to_str().unwrap(),
+        ])
+        .status();
+    match ffmpeg_status {
+        Ok(s) if s.success() => {}
+        Ok(s) => {
+            let msg = format!("ffmpeg resample failed: {s}");
+            error!("{msg}");
+            let _ = result_tx.send(SttResult::Error(msg));
+            return;
+        }
+        Err(e) => {
+            let msg = format!("ffmpeg error: {e}");
+            error!("{msg}");
+            let _ = result_tx.send(SttResult::Error(msg));
+            return;
+        }
+    }
+
     // Signal that we're processing
     let _ = result_tx.send(SttResult::Processing);
 
     // Transcribe
     let infer_start = Instant::now();
-    match svs.infer_file(&wav_path) {
+    match svs.infer_file(&resampled_path) {
         Ok(results) => {
             let infer_time = infer_start.elapsed();
             info!(

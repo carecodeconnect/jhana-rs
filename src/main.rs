@@ -35,6 +35,15 @@ use crate::llm::LlmOutput;
 use crate::stt::SttResult;
 use crate::ui::{App, AppState, render};
 
+/// Spoken + on-screen greeting played on launch. Each line is rendered
+/// in the TUI and queued to the TTS thread, so the device introduces
+/// itself audibly through the Uctronics speaker.
+const WELCOME_LINES: &[&str] = &[
+    "Welcome to jhana-rs.",
+    "Press the enter button to begin a meditation.",
+    "Press back to quit.",
+];
+
 /// Default meditation type loaded on startup.
 const DEFAULT_MEDITATION: &str = "test";
 
@@ -79,6 +88,13 @@ fn main() -> io::Result<()> {
     info!("terminal initialized, entering event loop");
 
     let mut app = App::new();
+
+    // Welcome the user: render greeting in the TUI and speak it via TTS so
+    // the device tells them what to do even if they can't read the screen.
+    for line in WELCOME_LINES {
+        app.push_sentence((*line).to_string());
+        let _ = tts_tx.send(tts::TtsCommand::Speak((*line).to_string()));
+    }
 
     // Main event loop
     let result = run_loop(

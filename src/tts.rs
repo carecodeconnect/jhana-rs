@@ -1,20 +1,25 @@
-//! Text-to-speech via Piper CLI.
+//! Text-to-speech baseline via espeak-ng.
 //!
 //! Runs TTS on a background thread, receiving sentences via an mpsc channel.
-//! Each sentence is piped to `piper` CLI which outputs a WAV file, then
-//! played via `aplay`. Uses the same thread + mpsc pattern as GPIO and LLM.
+//! Each sentence is synthesised by espeak-ng and played via `aplay` on the
+//! Uctronics speaker. Uses the same thread + mpsc pattern as GPIO and LLM.
 //!
-//! # Why Piper CLI?
+//! # Why espeak-ng (right now)
 //!
-//! sherpa-onnx was removed due to a protobuf-lite symbol clash with
-//! sensevoice-rs's sentencepiece-sys dependency. See `docs/05_NPU.md`.
-//! Piper CLI produces identical output — same model, same ONNX runtime,
-//! invoked as a subprocess instead of FFI.
+//! Piper CLI is broken on Armbian: `libpiper_phonemize.so.1` references
+//! `espeak_TextToPhonemesWithTerminator`, which Armbian's espeak-ng 1.51
+//! does not export. See docs/TROUBLESHOOTING.md.
 //!
-//! # Stopgap
+//! espeak-ng is the simplest working baseline: pure formant synthesis,
+//! single binary, no neural model, no GPU/NPU. The voice is robotic but
+//! always available. We can verify the full pipeline (LLM → TTS thread →
+//! audible speaker output) without untangling the C++ Piper toolchain.
 //!
-//! This is a temporary solution. The goal is pure Rust TTS on NPU via
-//! a piper-rknn-rs crate (fork of piper-rs with candle + rknn-rs backend).
+//! # Next step
+//!
+//! Move to `piper-rs` (Rust crate, neural VITS, natural voice) on CPU,
+//! then `piper-rknn-rs` on the RK3588 NPU for the VITS decoder
+//! (~4× speedup). See docs/TODO.md.
 
 use std::process::Command;
 use std::sync::mpsc::{Receiver, Sender};
@@ -31,20 +36,18 @@ pub enum TtsCommand {
     Stop,
 }
 
-/// Path to the Piper CLI binary on the Rock.
-const PIPER_BIN: &str = "/usr/local/bin/piper";
+/// ALSA playback device — Uctronics speaker, card 1 on Armbian with the
+/// uctronics-audio overlay loaded. `plughw:` handles sample-rate conversion.
+const PLAYBACK_DEVICE: &str = "plughw:1,0";
 
-/// Path to the Piper ONNX model on the Rock.
-const MODEL_PATH: &str =
-    "/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx";
+/// espeak-ng amplitude (0–200). 100 is the default and was the cleanest
+/// non-distorting setting on the Uctronics speaker in A/B testing —
+/// any higher and the small enclosure speaker clips. See docs/09_AUDIO.md.
+const ESPEAK_AMPLITUDE: &str = "100";
 
-/// ALSA playback device (Uctronics onboard speaker with plughw for mono->stereo).
-/// Card 0 on Armbian 26.2.1, was card 2 on old Radxa Ubuntu image.
-const PLAYBACK_DEVICE: &str = "plughw:0,0";
-
-/// Speech rate — higher values produce slower, calmer speech.
-/// 1.0 = normal, 1.3 = meditation pace, 2.0 = very slow.
-const LENGTH_SCALE: f32 = 1.3;
+/// espeak-ng speech rate (words/min). 145 is calm enough for meditation
+/// without dragging.
+const ESPEAK_RATE: &str = "145";
 
 /// Temporary WAV file for TTS output.
 const WAV_PATH: &str = "/tmp/jhana_tts.wav";
@@ -52,16 +55,17 @@ const WAV_PATH: &str = "/tmp/jhana_tts.wav";
 /// Start the TTS background thread.
 ///
 /// Returns a `Sender<TtsCommand>` for sending sentences to be spoken.
-/// The thread processes sentences sequentially — each one is synthesized
-/// via Piper CLI and played via `aplay`. If Piper is not installed,
-/// sentences are logged but not spoken (graceful degradation).
+/// The thread processes sentences sequentially — each one is synthesised
+/// via espeak-ng and played via `aplay`. If espeak-ng is missing the
+/// thread logs a one-time error and silently drops further sentences
+/// (graceful degradation — the rest of the pipeline keeps working).
 pub fn start() -> Sender<TtsCommand> {
     let (tx, rx) = std::sync::mpsc::channel::<TtsCommand>();
 
     std::thread::Builder::new()
         .name("tts".into())
         .spawn(move || {
-            info!("TTS thread started (Piper CLI)");
+            info!("TTS thread started (espeak-ng baseline)");
             tts_loop(&rx);
             info!("TTS thread exiting");
         })
@@ -70,15 +74,15 @@ pub fn start() -> Sender<TtsCommand> {
     tx
 }
 
-/// TTS event loop — processes sentences until channel closes.
+/// TTS event loop — processes sentences until the channel closes.
 fn tts_loop(rx: &Receiver<TtsCommand>) {
-    // Verify Piper is installed
-    match Command::new(PIPER_BIN).arg("--help").output() {
-        Ok(output) if output.status.success() || output.status.code() == Some(1) => {
-            info!("Piper CLI found at {PIPER_BIN}");
+    // One-time availability check so we don't fight to spawn espeak per sentence.
+    match Command::new("espeak-ng").arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            info!("espeak-ng available");
         }
         _ => {
-            error!("Piper CLI not found at {PIPER_BIN} — TTS disabled");
+            error!("espeak-ng not found — TTS will be silent");
             while let Ok(cmd) = rx.recv() {
                 if let TtsCommand::Speak(s) = cmd {
                     info!("TTS unavailable, skipping: {s}");
@@ -90,9 +94,7 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
-            TtsCommand::Speak(sentence) => {
-                speak_sentence(&sentence);
-            }
+            TtsCommand::Speak(sentence) => speak_sentence(&sentence),
             TtsCommand::Stop => {
                 info!("TTS stop requested");
                 while rx.try_recv().is_ok() {}
@@ -101,63 +103,51 @@ fn tts_loop(rx: &Receiver<TtsCommand>) {
     }
 }
 
-/// Synthesize a sentence via Piper CLI and play via aplay.
+/// Synthesise `sentence` to WAV via espeak-ng and play it on the speaker.
 fn speak_sentence(sentence: &str) {
+    let preview = &sentence[..sentence.len().min(50)];
     let start = std::time::Instant::now();
 
-    // Piper CLI: echo "text" | piper --model X --output_file Y --length_scale Z
-    let piper_status = Command::new(PIPER_BIN)
+    let synth = Command::new("espeak-ng")
         .args([
-            "--model",
-            MODEL_PATH,
-            "--output_file",
+            "-a",
+            ESPEAK_AMPLITUDE,
+            "-s",
+            ESPEAK_RATE,
+            "-w",
             WAV_PATH,
-            "--length_scale",
-            &LENGTH_SCALE.to_string(),
+            sentence,
         ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(sentence.as_bytes());
-            }
-            child.wait()
-        });
+        .output();
 
-    match piper_status {
-        Ok(status) if status.success() => {
-            let synth_time = start.elapsed();
+    match synth {
+        Ok(output) if output.status.success() => {
             info!(
-                "TTS: {:.2}s synth — {}",
-                synth_time.as_secs_f32(),
-                &sentence[..sentence.len().min(50)]
+                "TTS: {:.2}s synth — {preview}",
+                start.elapsed().as_secs_f32()
             );
         }
-        Ok(status) => {
+        Ok(output) => {
             error!(
-                "Piper failed with {status} for: {}",
-                &sentence[..sentence.len().min(50)]
+                "espeak-ng failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
             );
             return;
         }
         Err(e) => {
-            error!("Piper error: {e}");
+            error!("espeak-ng error: {e}");
             return;
         }
     }
 
-    // Play via aplay
     match Command::new("aplay")
-        .args(["-D", PLAYBACK_DEVICE, WAV_PATH])
+        .args(["-q", "-D", PLAYBACK_DEVICE, WAV_PATH])
         .output()
     {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!("aplay failed: {stderr}");
+            error!("aplay failed: {}", String::from_utf8_lossy(&output.stderr));
         }
         Err(e) => error!("aplay error: {e}"),
     }
