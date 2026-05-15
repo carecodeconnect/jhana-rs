@@ -40,7 +40,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
 };
-use tui_big_text::{BigText, PixelSize};
 
 // ---------- Theme ----------
 
@@ -371,6 +370,18 @@ fn render_status_strip(frame: &mut Frame, area: ratatui::layout::Rect, app: &App
     );
 }
 
+/// Render the focal card.
+///
+/// We can't make text *literally* larger on a Linux TTY (font is
+/// fixed at 32×16 px). Emphasis is built from:
+/// - Double-border framing
+/// - Centred alignment
+/// - Bold modifier
+/// - Generous whitespace above and below
+/// - Activity log items feel smaller by being crowded together
+///
+/// Real "big text" would need a graphical terminal (cage + foot, or
+/// leftwm + alacritty). See README / docs/14_TODO.md task #20.
 fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let t = &app.theme;
     let block = Block::default()
@@ -381,20 +392,7 @@ fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Split inner into big-text region + plain mirror region.
-    let inner_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // top padding
-            Constraint::Length(6), // big text (5 rows for Quadrant + 1 buffer)
-            Constraint::Length(1), // gap
-            Constraint::Min(2),    // plain-text mirror (wrapped)
-            Constraint::Length(1), // bottom padding
-        ])
-        .split(inner);
-
-    // Big-text content depends on active tool.
-    let (big_lines, mirror_lines): (Vec<Line>, Vec<Line>) = match &app.active_tool {
+    let (focal_lines, sub_line) = match &app.active_tool {
         Some(ActiveTool::Pausing {
             ends_at,
             total_secs,
@@ -402,44 +400,60 @@ fn render_focal_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) 
             let remaining = ends_at
                 .saturating_duration_since(Instant::now())
                 .as_secs_f32();
-            let big = format!("{}", remaining.ceil() as u32);
-            let mirror = format!(
-                "silence  ·  {}/{}s",
-                (total_secs - remaining).ceil() as u32,
-                *total_secs as u32
-            );
-            (vec![Line::from(big)], vec![center_line(&mirror, &t.dim)])
+            (
+                vec![format!("{}", remaining.ceil() as u32)],
+                Some(format!(
+                    "silence  ·  {}/{}s",
+                    (total_secs - remaining).ceil() as u32,
+                    *total_secs as u32
+                )),
+            )
         }
-        Some(ActiveTool::RingingBell) => (vec![Line::from("♪")], vec![center_line("bell", &t.dim)]),
-        Some(ActiveTool::Listening) => (
-            vec![Line::from("listening")],
-            vec![center_line("· · · ·", &t.dim)],
-        ),
+        Some(ActiveTool::RingingBell) => (vec!["♪".to_string()], Some("bell".to_string())),
+        Some(ActiveTool::Listening) => (vec!["listening".to_string()], Some("· · · ·".to_string())),
         _ => {
-            // Default: show the most recent say() text. If none, show
-            // a soft tagline.
             let text = app.current_say.as_deref().unwrap_or("be still").to_string();
-            let big_short = pick_big_phrase(&text);
-            let mirror = wrap_text(&text, inner_chunks[3].width as usize);
-            let mirror_lines: Vec<Line> =
-                mirror.into_iter().map(|s| center_line(&s, &t.fg)).collect();
-            (vec![Line::from(big_short)], mirror_lines)
+            let wrap_width = inner.width.saturating_sub(4) as usize;
+            (wrap_text(&text, wrap_width), None)
         }
     };
 
-    let big_text = BigText::builder()
-        .pixel_size(PixelSize::Quadrant)
-        .style(Style::default().fg(t.fg).bg(t.bg))
-        .alignment(Alignment::Center)
-        .lines(big_lines)
-        .build();
-    frame.render_widget(big_text, inner_chunks[1]);
+    let content_rows = focal_lines.len() as u16 + if sub_line.is_some() { 2 } else { 0 };
+    let pad_top = inner.height.saturating_sub(content_rows) / 2;
+    let pad_bottom = inner
+        .height
+        .saturating_sub(content_rows)
+        .saturating_sub(pad_top);
 
-    let mirror = Paragraph::new(mirror_lines)
+    let mut lines: Vec<Line> = Vec::new();
+    for _ in 0..pad_top {
+        lines.push(Line::from(""));
+    }
+    for f in &focal_lines {
+        lines.push(Line::from(Span::styled(
+            f.clone(),
+            Style::default()
+                .fg(t.fg)
+                .bg(t.bg)
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
+    if let Some(sub) = sub_line {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            sub,
+            Style::default().fg(t.dim).bg(t.bg),
+        )));
+    }
+    for _ in 0..pad_bottom {
+        lines.push(Line::from(""));
+    }
+
+    let p = Paragraph::new(lines)
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true })
         .style(Style::default().bg(t.bg));
-    frame.render_widget(mirror, inner_chunks[3]);
+    frame.render_widget(p, inner);
 }
 
 fn render_loading_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
@@ -452,31 +466,31 @@ fn render_loading_card(frame: &mut Frame, area: ratatui::layout::Rect, app: &App
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let big_text = BigText::builder()
-        .pixel_size(PixelSize::Quadrant)
-        .style(Style::default().fg(t.fg).bg(t.bg))
-        .alignment(Alignment::Center)
-        .lines(vec![Line::from("loading")])
-        .build();
-    let inner_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),
-            Constraint::Length(6),
-            Constraint::Min(0),
-        ])
-        .split(inner);
-    frame.render_widget(big_text, inner_chunks[1]);
     let stt_ready = crate::stt::STT_READY.load(std::sync::atomic::Ordering::Acquire);
     let stage = if stt_ready {
-        "warming the meditation model (≈80 s)"
+        "warming the meditation model"
     } else {
         "warming the speech recogniser"
     };
-    let p = Paragraph::new(stage)
+
+    let pad_top = inner.height.saturating_sub(4) / 2;
+    let mut lines: Vec<Line> = (0..pad_top).map(|_| Line::from("")).collect();
+    lines.push(Line::from(Span::styled(
+        "loading",
+        Style::default()
+            .fg(t.fg)
+            .bg(t.bg)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        stage,
+        Style::default().fg(t.dim).bg(t.bg),
+    )));
+    let p = Paragraph::new(lines)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(t.dim).bg(t.bg));
-    frame.render_widget(p, inner_chunks[2]);
+        .style(Style::default().bg(t.bg));
+    frame.render_widget(p, inner);
 }
 
 fn render_log(frame: &mut Frame, area: ratatui::layout::Rect, app: &App) {
