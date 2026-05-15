@@ -15,6 +15,21 @@ crossterm = "0.28"
 # `scripts/rock-kmscon-setup.sh`. 0.7.3 is the last release
 # compatible with ratatui 0.29.
 tui-big-text = "0.7.3"
+
+# Slint GUI framework — for the Phase C `jhana-rs-slint` binary that
+# renders directly to DRM/KMS via the `linuxkms` backend. The
+# `jhana-rs` binary still uses ratatui + kmscon and does not link
+# Slint. See `docs/18_SLINT.md`.
+#
+# default-features=false because we don't want winit / X11 backends.
+# `backend-linuxkms` is the production target. `renderer-software` is
+# the safe fallback; `renderer-femtovg` uses GL ES via Panfrost.
+slint = { version = "1", default-features = false, features = [
+    "backend-linuxkms",
+    "renderer-software",
+    "renderer-femtovg",
+    "compat-1-2",
+] }
 log = "0.4"
 simplelog = "0.12"
 signal-hook = "0.3"
@@ -31,6 +46,12 @@ axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tower = "0.5"
 uuid = { version = "1", features = ["v4"] }
+
+[build-dependencies]
+# slint-build compiles `ui/*.slint` into Rust code at build time. See
+# `build.rs` for the invocation. Only the `jhana-rs-slint` binary
+# consumes the generated code; the other binaries don't.
+slint-build = "1"
 
 [lints.rust]
 # Relaxed from "forbid" to "warn" because sherpa-onnx uses unsafe FFI.

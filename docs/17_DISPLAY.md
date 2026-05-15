@@ -57,24 +57,37 @@ big-text meditation surface the whole time.
 
 ## Visual direction (user-stated, 2026-05-15)
 
-The target aesthetic is **"a loading screen from the 80s/90s"**:
+Target aesthetic: **early-80s cyberpunk computer terminal — Tron,
+WarGames, Weird Science.**
 
-- Pixel-art-style chunky letters; no anti-aliasing, hard edges.
-- Limited palette (4-8 colours) with one or two strong accents on a
-  neutral ground — phosphor-green-on-black, amber-on-black, or
-  warm-cream-on-soft-cream like a Mac SE manual.
-- Big retro-blocky type for the focal sentence and the loading state.
-- A loading bar / dot animation while models warm up.
-- Pixel-art-style decorative elements — a meditating monk silhouette,
-  a sumi-e ensō circle, a candle, a static mandala — appearing in the
-  focal card when nothing else is active.
-- Slow, deliberate transitions (no easing curves you'd see in a 2024
-  web app; think `setInterval(redraw, 100ms)` step animation).
+- **Dark base.** Near-black background (`#0a0a0a` or `#04050a`). No
+  cream / parchment. Think IMSAI-8080 monitor at 2 a.m.
+- **Neon accents.** A small set of saturated colours — phosphor cyan
+  (`#00d4ff`), terminal green (`#39ff14`), amber-warning (`#ffb000`),
+  magenta-alert (`#ff00aa`). Each colour means a state, not just
+  decoration.
+- **Glowing edges.** Bright stroke + soft outer blur on focal text —
+  CRT phosphor bloom. Subtle, not maxed-out.
+- **Pixel fonts.** Monospace bitmap fonts — Press Start 2P, VT323,
+  IBM CGA, or a similar TTF. No smoothing.
+- **Geometric grid background.** A Tron-style perspective grid or a
+  simple repeating square mesh, drawn in `#0e1a26` (cyan-dimmed) at
+  low contrast. Optional but defines the era.
+- **Scanline overlay.** Subtle horizontal 1-px-on / 1-px-off line
+  pattern over the whole frame — adds CRT texture. ≤ 10 % opacity.
+- **Step animations.** Loading-dot bouncers, ticker-style scrolling
+  text, blocky progress bars filling cell by cell. No 60-fps eased
+  curves; we want 4-10 fps deliberate animation.
+- **Decorative motifs.** A meditating monk silhouette pixel-art, an
+  ensō circle drawn as a thick low-poly ring, a candle flame as a
+  3-frame loop, a mandala as a static vector — to fill the focal
+  card during idle / between turns.
 
-Reachable under ratatui+kmscon **partially** (with thoughtful unicode
-art and palette restraint) but most of the visual vocabulary above —
-sub-cell pixel art, alpha-blended dot animations, custom pixel fonts
-loaded at boot — needs a real GUI framework. That's the Slint phase.
+Reachable under ratatui+kmscon **partially** (palette and pixel
+fonts via the kmscon TTF path, simple step animations via per-frame
+ratatui redraw). The decorative motifs, glow effects, geometric
+grids, and scanline overlays need a real GUI framework. That's
+Phase C.
 
 ### Phase A (ship-today, low-risk): kmscon — STAGED 2026-05-15
 

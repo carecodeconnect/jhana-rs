@@ -1,0 +1,281 @@
+// jhana.slint — Phase C UI for jhana-rs.
+//
+// Aesthetic: Tron / WarGames / Weird Science. Dark base, neon
+// phosphor accents, glow on focal text, geometric grid background,
+// scanline overlay. See docs/17_DISPLAY.md § Visual direction and
+// docs/18_SLINT.md for the full Slint-side architecture.
+//
+// This is C-1 (scaffold). Static layout, hardcoded sample content,
+// no live binding to AgentEvent yet — that's C-3.
+
+// --- palette ----------------------------------------------------------
+// Centralised so the whole UI shifts mood by tweaking one struct.
+
+export struct Palette {
+    base: color,            // near-black canvas
+    grid: color,            // dim cyan grid lines
+    body: color,            // dim phosphor for body text
+    accent_cyan: color,     // primary neon
+    accent_green: color,    // listening / ready
+    accent_amber: color,    // pausing
+    accent_magenta: color,  // alert / bell flash
+    dim: color,             // log entries fading toward dark
+    border: color,          // focal card neon stroke
+}
+
+// Tron-inspired phosphor terminal palette.
+export global Theme {
+    out property <Palette> dark: {
+        base: #04050a,
+        grid: #0e1a26,
+        body: #b0d8e8,
+        accent_cyan: #00d4ff,
+        accent_green: #39ff14,
+        accent_amber: #ffb000,
+        accent_magenta: #ff00aa,
+        dim: #4a6b78,
+        border: #00d4ff,
+    };
+}
+
+// --- top status strip -------------------------------------------------
+
+component StatusStrip inherits Rectangle {
+    in property <string> state: "idle";
+    in property <string> active-tool: "";
+
+    height: 60px;
+    background: Theme.dark.base;
+
+    // Pick a chip colour by state.
+    property <color> chip-color: active-tool == "speaking" ? Theme.dark.accent_cyan
+        : active-tool == "listening" ? Theme.dark.accent_green
+        : active-tool == "pausing"   ? Theme.dark.accent_amber
+        : state == "thinking"        ? Theme.dark.accent_magenta
+        : Theme.dark.dim;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 12px;
+        alignment: space-between;
+
+        Text {
+            text: "JHANA";
+            color: Theme.dark.accent_cyan;
+            font-size: 22px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            background: transparent;
+            border-color: chip-color;
+            border-width: 2px;
+            border-radius: 4px;
+            width: 220px;
+            height: 36px;
+            Text {
+                text: "[ " + (active-tool != "" ? active-tool : state) + " ]";
+                color: chip-color;
+                font-size: 18px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Bottom hairline rule in dim cyan.
+    Rectangle {
+        x: 0; y: parent.height - 1px;
+        width: 100%; height: 1px;
+        background: Theme.dark.grid;
+    }
+}
+
+// --- focal card -------------------------------------------------------
+
+component FocalCard inherits Rectangle {
+    in property <string> current-say: "be still";
+    in property <string> active-tool: "";
+    in property <int> pause-remaining: 0;
+
+    background: Theme.dark.base;
+
+    // Neon double-border via two concentric rectangles.
+    Rectangle {
+        x: 12px; y: 12px;
+        width: parent.width - 24px;
+        height: parent.height - 24px;
+        background: Theme.dark.base;
+        border-color: Theme.dark.accent_cyan;
+        border-width: 2px;
+        border-radius: 2px;
+    }
+    Rectangle {
+        x: 16px; y: 16px;
+        width: parent.width - 32px;
+        height: parent.height - 32px;
+        background: transparent;
+        border-color: Theme.dark.accent_cyan;
+        border-width: 1px;
+        opacity: 0.4;
+    }
+
+    // Big focal text. Cyan with subtle drop shadow for the glow effect.
+    Text {
+        x: 24px; y: parent.height / 2 - 80px;
+        width: parent.width - 48px;
+        height: 160px;
+        text: active-tool == "pausing"
+            ? pause-remaining + "s"
+            : current-say;
+        color: Theme.dark.accent_cyan;
+        font-size: active-tool == "pausing" ? 120px : 56px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: word-wrap;
+    }
+
+    // Hint label under the focal text.
+    Text {
+        x: 0; y: parent.height - 60px;
+        width: parent.width; height: 24px;
+        text: active-tool == "listening" ? "· · · listening · · ·"
+            : active-tool == "pausing"   ? "silence"
+            : active-tool == "speaking"  ? "now speaking"
+            : "";
+        color: Theme.dark.dim;
+        font-size: 16px;
+        horizontal-alignment: center;
+    }
+}
+
+// --- activity log -----------------------------------------------------
+
+export struct LogEntry {
+    kind: string,       // "user" | "agent" | "tool" | "system"
+    text: string,
+}
+
+component ActivityLog inherits Rectangle {
+    in property <[LogEntry]> entries: [
+        { kind: "system", text: "ready" },
+    ];
+
+    background: Theme.dark.base;
+
+    Rectangle {
+        x: 16px; y: 8px;
+        width: parent.width - 32px; height: 1px;
+        background: Theme.dark.grid;
+    }
+    Text {
+        x: 16px; y: 12px;
+        text: "ACTIVITY";
+        color: Theme.dark.dim;
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    VerticalLayout {
+        x: 16px; y: 40px;
+        width: parent.width - 32px;
+        spacing: 4px;
+
+        for entry in entries: HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: entry.kind == "user" ? ">"
+                    : entry.kind == "agent" ? "JHANA:"
+                    : entry.kind == "tool"  ? "·"
+                    : "—";
+                color: entry.kind == "user" ? Theme.dark.accent_green
+                    : entry.kind == "agent" ? Theme.dark.accent_cyan
+                    : Theme.dark.dim;
+                font-size: 14px;
+                font-weight: 700;
+                width: 60px;
+            }
+            Text {
+                text: entry.text;
+                color: entry.kind == "user" ? Theme.dark.body
+                    : entry.kind == "agent" ? Theme.dark.body
+                    : Theme.dark.dim;
+                font-size: 14px;
+            }
+        }
+    }
+}
+
+// --- main window ------------------------------------------------------
+
+export component MainWindow inherits Window {
+    in property <string> state: "loading";
+    in property <string> active-tool: "";
+    in property <string> current-say: "warming the meditation model";
+    in property <int> pause-remaining: 0;
+    in property <[LogEntry]> log-entries: [];
+
+    // Rock 5A DSI panel — 720 wide × 1280 tall (rotated at the DRM
+    // level via video=DSI-1:rotate=90).
+    width: 720px;
+    height: 1280px;
+    background: Theme.dark.base;
+    no-frame: true;
+    title: "jhana";
+
+    // Tron-grid background — a static grid of dim cyan lines.
+    // Implemented as a Path drawn via the Rectangle's background
+    // gradient would be ideal but Slint requires a different idiom.
+    // Use a simple repeating rect pattern instead.
+    Rectangle {
+        width: 100%; height: 100%;
+        background: Theme.dark.base;
+        // Horizontal grid lines at every 64 px.
+        for row in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]: Rectangle {
+            x: 0; y: row * 64px;
+            width: parent.width; height: 1px;
+            background: Theme.dark.grid;
+        }
+        // Vertical grid lines every 64 px.
+        for col in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]: Rectangle {
+            x: col * 64px; y: 0;
+            width: 1px; height: parent.height;
+            background: Theme.dark.grid;
+        }
+    }
+
+    VerticalLayout {
+        StatusStrip {
+            state: root.state;
+            active-tool: root.active-tool;
+        }
+        FocalCard {
+            current-say: root.current-say;
+            active-tool: root.active-tool;
+            pause-remaining: root.pause-remaining;
+            min-height: 600px;
+        }
+        ActivityLog {
+            entries: root.log-entries;
+            min-height: 580px;
+        }
+    }
+
+    // Scanline overlay — 1px on, 1px off, full frame, 8 % opacity.
+    Rectangle {
+        width: 100%; height: 100%;
+        background: transparent;
+        for line in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]: Rectangle {
+            x: 0;
+            y: line * 20px;
+            width: parent.width;
+            height: 1px;
+            background: #000000;
+            opacity: 0.18;
+        }
+    }
+}
