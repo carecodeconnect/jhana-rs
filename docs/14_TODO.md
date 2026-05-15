@@ -80,6 +80,56 @@ Performance numbers live in [11_BENCHMARKS.md](11_BENCHMARKS.md).
     Qwen3-1.7B's output.
   Pick a Rust ELIZA port at implementation time; primary goal is the
   reflection-template inspiration, not the deterministic engine.
+- [ ] **Implement a proper co-constructed closing sequence** per
+  Sacks, Schegloff & Jefferson, *"Opening Up Closings"* (1973,
+  *Semiotica* 8:289–327). Today's `goodnight()` tool is a *unilateral*
+  termination — the model presses an exit button. In CA terms, real
+  closings are **collaborative**: one party opens a
+  *closing-implicative environment* with a pre-closing token ("well...",
+  "OK then...", "alright..."), the other ratifies it, and only then
+  does the terminal exchange ("bye" / "bye") release the conversation.
+  Concrete sequence we want:
+  - say("Take a moment to notice how you feel.")  ← pre-closing
+  - pause(8)
+  - say("Whenever you're ready, you can open your eyes.")
+  - listen()                                       ← user's ratification
+  - say("Be well.")                                ← terminal-pair-first-part
+  - ring_bell()
+  - goodnight()                                    ← terminal release
+  The model needs explicit prompt scaffolding to construct this rather
+  than dumping a closing-pleasantry loop. Also: if the user's
+  `listen()` response is more than a brief acknowledgement, the agent
+  should open the inquiry sequence (Crane et al., above) BEFORE closing,
+  not after.
+- [ ] **Real turn-taking infrastructure** (Sacks, Schegloff, Jefferson,
+  *"A Simplest Systematics for the Organization of Turn-Taking for
+  Conversation"*, 1974, *Language* 50:696–735). The prompt-level
+  "listen every 2-3 says" mandate is a workaround. True
+  interactional capacity needs:
+  - **Half-duplex VAD barge-in.** Mic capture runs *while* paroli is
+    speaking. If the VAD detects sustained voice activity, pause TTS
+    immediately, drain the audio buffer into a transcript, and feed
+    that as a tool result back to the agent at the next turn boundary.
+    Implementation: add a `mic_monitor` thread that reads
+    `arecord` chunks in parallel with TTS playback, runs Silero-VAD
+    (already a sensevoice-rs dep), and emits a `BargeIn(transcript)`
+    event when triggered. The agent's pending `say()` ack gets
+    interrupted; loop receives a synthetic `listen()` result; model
+    next turn responds to the user.
+  - **Backchanneling.** Short ("mhm", "yeah", "ok") TTS fragments
+    emitted while the user is mid-turn to show active listening. In
+    CA, backchannels are *continuers* — they signal "I'm here, keep
+    going" without taking the turn. Implementation: STT thread emits
+    `Speaking(partial_transcript)` events during the user's turn; a
+    small policy in the agent context picks brief continuers and
+    sends them via `TtsCommand::Speak`. Done via paroli these are
+    fast (RTF 0.29) so latency is OK.
+  - **Repair pre-detection.** Today repair recognition is prompt-only
+    — the model has to notice "sorry?" / "what?" / silence and
+    re-do the previous turn. A small post-processor on `listen()`
+    output that detects repair-vocab and short utterances could
+    annotate the tool result (`{transcript: "...", repair: true}`)
+    so the model gets a structured signal, not an inference task.
 
 **POC success criterion (Phase 1):** Text prompt -> LLM streams meditation
 text -> ratatui displays sentences with pause markers -> Piper generates WAV

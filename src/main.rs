@@ -482,7 +482,7 @@ fn handle_start_agent(
                         tts_tx,
                         stt_tx,
                         stt_results,
-                        meditations_dir: std::path::PathBuf::from("prompts/meditations"),
+                        skills_dir: std::path::PathBuf::from("prompts/agent_skills"),
                     };
                     let mut history = history;
                     if let Err(e) = agent_loop::run_agent(
@@ -491,7 +491,10 @@ fn handle_start_agent(
                         &agent_tx,
                         &ctx,
                         &cancel,
-                        50, // max_turns — enough for a multi-question dialogue + meditation
+                        // max_turns — short enough that a runaway closing-loop
+                        // exits within ~3 minutes if `goodnight()` never fires.
+                        // Real sessions land well inside this.
+                        15,
                     ) {
                         // MaxTurns and Cancelled emit their own AgentEvent::Done first.
                         match e {
@@ -517,68 +520,35 @@ fn handle_start_agent(
     }
 }
 
-/// Build the initial chat history for an agent session: a NCF-aware
-/// system prompt + a tool-call-traced few-shot exemplar + a synthetic
+/// Build the initial chat history for an agent session: the NCF-aware
+/// system prompt loaded from `prompts/agent_system.txt` + a synthetic
 /// user turn representing the ENTER button press.
 ///
-/// IMPORTANT: do NOT embed the legacy `prompts/meditations/test.txt`
-/// here — it uses `[BELL]` / `[N]` inline markers, and the model
-/// mimics that format directly, emitting "[bell]" and "[15]" as
-/// literal text instead of calling `ring_bell()` / `pause(15)`. The
-/// exemplar below shows the correct *output shape* — a chain of
-/// `<tool_call>` blocks — which is what the model needs to copy.
+/// The system prompt lives in the prompts/ folder so it can be edited
+/// without recompiling. If the file is missing we fall back to a
+/// minimal inline prompt so the binary still functions for
+/// development off-device. Skills (per-meditation guidance) load
+/// on-demand from `prompts/agent_skills/*.md` via the future
+/// `read_skill` tool — placeholder structure exists today.
 fn seed_agent_history() -> Vec<ChatMessage> {
-    let system = "You are Jhana, a kind and gentle meditation guide.
-
-# Output format (STRICT)
-
-You speak ONLY by emitting `<tool_call>{\"name\":\"...\",\"arguments\":{...}}</tool_call>` blocks. \
-You NEVER write spoken words as plain text. You NEVER write `[BELL]`, `[N]`, `[15]`, or any bracket marker. \
-Bells and pauses are tool calls, not text. Anything you put as plain text outside a `<tool_call>` block \
-will be ignored by the runtime; if you want the user to hear something, you MUST wrap it in say().
-
-# Tools
-
-- `say(text)`: speak `text` aloud. Blocks until TTS finishes — one speaker at a time.
-- `listen(seconds)`: record from the mic (default 7s) and return the transcribed text.
-- `ring_bell()`: ring the meditation bell once. Use ONLY at the very start and at the close of a meditation.
-- `pause(seconds)`: silent gap. The silence itself is meaningful — generous between breaths, between phases.
-- `list_meditations()`: list available meditation templates.
-- `read_meditation(name)`: read a template body for stylistic reference (don't read verbatim).
-
-# Opening (NCF summons-answer)
-
-When the session begins, your FIRST action is `say(\"Hello?\")` and then `listen()`. \
-Do NOT start a meditation until the user reciprocates and asks for one.
-
-# Example assistant turn (this is what your output should look like)
-
-<tool_call>{\"name\":\"say\",\"arguments\":{\"text\":\"Welcome. Let's begin with a slow breath in.\"}}</tool_call>
-<tool_call>{\"name\":\"ring_bell\",\"arguments\":{}}</tool_call>
-<tool_call>{\"name\":\"pause\",\"arguments\":{\"seconds\":10}}</tool_call>
-<tool_call>{\"name\":\"say\",\"arguments\":{\"text\":\"And now exhale, letting the body soften.\"}}</tool_call>
-<tool_call>{\"name\":\"pause\",\"arguments\":{\"seconds\":8}}</tool_call>
-
-Notice: no prose outside the tool_call blocks. No `[BELL]`. No `[15]`. Every word the user hears \
-goes through say().
-
-# Closing
-
-End a session by emitting a final plain-text response with NO tool calls — that signals the runtime \
-to release the session. Before that, ring the bell once and pause.
-
-# Style
-
-Speak briefly and warmly. Use pauses generously (10-30s between breaths is normal). \
-Use exactly two `ring_bell()` calls per meditation: one at the very start, one before the closing line.
-Recognise repair turns from `listen()` output (\"sorry?\", \"what?\", silence) and re-do the previous \
-`say()` turn rather than continuing.";
+    let system = std::fs::read_to_string("prompts/agent_system.txt").unwrap_or_else(|e| {
+        log::error!("could not read prompts/agent_system.txt: {e} — using minimal fallback");
+        MINIMAL_FALLBACK_SYSTEM.to_string()
+    });
 
     vec![
-        ChatMessage::system(system.to_string()),
+        ChatMessage::system(system),
         ChatMessage::user("[User pressed the ENTER button to begin.]"),
     ]
 }
+
+/// Minimal in-binary fallback when `prompts/agent_system.txt` is missing.
+/// Real behaviour lives in the prompt file — this is just enough to
+/// keep the build working off-device. If you see this on-device it
+/// means the file is missing or the working directory is wrong.
+const MINIMAL_FALLBACK_SYSTEM: &str = "You are Jhana, a meditation guide. \
+Speak only by emitting <tool_call>{...}</tool_call> blocks. \
+Open with say(\"Hello?\") then listen(). End every session with goodnight().";
 
 /// One-line summary of tool-call args for the console pane.
 fn summarize_args(v: &serde_json::Value) -> String {

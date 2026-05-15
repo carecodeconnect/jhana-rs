@@ -37,18 +37,101 @@ tool calls*, not what tools mean.
 
 ## Influences (what we're borrowing, with file refs)
 
-Drawn from a survey of `rig`, `goose`, `kalosm`, `vox`, `candle`,
-`burn`, `fusor-ml` — see commit message of the agent-rs starter commit
-for the full research summary.
+Three layers of design lineage. The **inner loop** comes from the Rust
+agent-framework survey (rig / goose / vox / kalosm); the **interaction
+model** comes from Natural Conversation Framework + Conversation
+Analysis; the **wider product feel** ("system that does things, with
+a live canvas, with heartbeats") comes from OpenClaw and the tool-as-
+affordance discipline from pi.
+
+### Rust agent harnesses
 
 | From | What | File reference |
 |---|---|---|
 | **rig** | The loop body shape — `loop { call_model → partition into (tool_calls, texts) → if no tool_calls break → else dispatch + push tool_result → continue }`, bounded by `max_turns`. | `0xPlaygrounds/rig` → `crates/rig-core/src/agent/prompt_request/mod.rs:390-560` |
-| **rig** | The `Tool::call(args) -> output` minimum signature. We don't take the trait — six tools fit in a `match` — but the call shape is right. | `crates/rig-core/src/tool/mod.rs` |
+| **rig** | The `Tool::call(args) -> output` minimum signature. We don't take the trait — seven tools fit in a `match` — but the call shape is right. | `crates/rig-core/src/tool/mod.rs` |
 | **goose** | The `AgentEvent` enum streamed to the consumer. Gives ratatui backpressure and lets us show "tool dispatching..." in the console pane. | `block/goose` → `crates/goose/src/agents/agent.rs:185, 1227` |
 | **goose** | On `max_turns` reached, yield a graceful assistant message instead of erroring. A meditation guide should never crash mid-session. | same file, line 1510 |
 | **vox** | `SentenceBuffer` — handles "Dr." / "Mr." / decimal points correctly. Worth porting verbatim; our current `llm.rs` splits naively on `.`. | `mrtozner/vox` → `src/streaming_chat.rs:38-110` |
 | **kalosm** | The flat `ChatMessage { role, content, tool_calls, tool_call_id }` shape, which is also the OpenAI shape, which is also already what `jhana-llm-server` speaks. | `floneum/floneum` → `interfaces/language-model/src/chat/mod.rs` |
+
+### OpenClaw (https://openclaw.ai/, https://github.com/openclaw/openclaw)
+
+The product framing — "AI that actually does things" — informs the
+*shape* of our TUI more than the code. OpenClaw is a multi-channel
+local assistant; the design ideas worth borrowing:
+
+- **"AI that actually does things"** (`VISION.md` line 1) — our TUI
+  prioritises visible doing-ness over conversational chatter. Every
+  tool dispatch surfaces as a TUI event so the user sees the agent
+  act, not just speak.
+- **"It can render a live Canvas you control"** (`README.md` line 11)
+  — the agent updates a real-time display surface. For jhana-rs, the
+  meditation pane *is* the canvas: it re-renders based on what tool
+  is currently active (say-text appearing large, listen showing a
+  recording meter, pause showing a countdown). See `docs/14_TODO.md`
+  TUI redesign task.
+- **Heartbeats / proactive check-ins** — agent communicates state
+  periodically, not just on user input. Maps onto our
+  `AgentEvent::ToolStart` → console pane: the user can see the agent
+  is alive between tool dispatches.
+- **Channels concept** — voice channel (paroli + SenseVoice) is the
+  *primary* interaction medium; the TUI is a mirror, not the entry
+  point. We deliberately don't accept typed input — the device runs
+  on a tty with no shell, voice only.
+
+What we don't take from OpenClaw: the multi-channel messaging
+architecture (we have one device, one user, one channel), the
+plugin-as-npm distribution model (we're a single Rust binary), the
+heavy onboarding wizard (the meditation guide should just work).
+
+### pi (https://pi.dev, https://github.com/earendil-works/pi-mono)
+
+We pivoted away from pi as our harness (see `docs/10_SPECS.md §
+Outcome`) but the design lessons stay:
+
+- **Tool catalog as affordances.** What's *callable* defines what's
+  *possible*. Pi gives the model `read/write/edit/bash` because it's
+  a coding agent. We give the model `say/listen/ring_bell/pause/...`
+  because it's a meditation guide. Restricting the affordance
+  surface is how an agent stays on-genre — see the NCF callout in
+  the Tool catalog section below.
+- **Tools as first-class structured objects.** Pi's `ToolDefinition`
+  shape — `name + description + parameters + run()` — maps cleanly
+  onto our `Tool` enum + `ToolDef` JSON-Schema for the model + match-
+  arm dispatcher. We don't take pi's TypeScript-extension boundary
+  (we're in-process Rust), but the *interface shape* is the same.
+- **Skill vs extension distinction** (`pi_sandbox/docs/10-extensions.md`
+  line 1-12) — a skill is markdown-as-instructions the model loads on
+  demand; an extension is code-as-runtime-capability. We currently
+  collapse both into the 7-tool catalog, with `read_meditation` being
+  the closest thing to a skill (markdown loaded on demand). Future
+  tool growth might re-split this.
+
+### Natural Conversation Framework (Robert J. Moore, IBM Research)
+
+Detailed in `docs/15_INTERACTION.md`. NCF applies findings from
+Conversation Analysis (Sacks, Schegloff, Jefferson) to conversational
+AI. For us, NCF isn't flavouring — it's the **spec**. Every tool
+dispatch decision and every prompt instruction maps onto a CA
+primitive:
+
+- **Adjacency pairs** (say/listen) — first-pair-part projects the
+  shape of the second-pair-part.
+- **Pre-sequences** ("are you ready?" before "close your eyes") —
+  warm the conversation before the main action.
+- **Repair** — recognise "sorry?", "what?", silence on listen()
+  output and redo the previous turn.
+- **Preference organisation** — accept dispreferred responses
+  gracefully; never push back on a "no".
+- **Sequence closing** — "Opening Up Closings" (Sacks/Schegloff/Jefferson
+  1973): closings are co-constructed, not unilateral. Today's
+  `goodnight()` is unilateral; see `docs/14_TODO.md` for the
+  collaborative-closing follow-up.
+- **Turn-taking systematics** (S/S/J 1974) — TRPs (transition-relevance
+  places), backchanneling, barge-in. The prompt-level "listen every
+  2-3 says" mandate is a workaround; true turn-taking infrastructure
+  is in `docs/14_TODO.md`.
 
 ## Explicitly NOT borrowing
 

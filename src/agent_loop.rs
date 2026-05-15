@@ -76,16 +76,24 @@ impl std::error::Error for AgentError {}
 
 // ---------- Tool catalog ----------
 
-/// Six fixed tools. No trait, no `Box<dyn>` — one `match` per dispatch.
+/// Seven fixed tools. No trait, no `Box<dyn>` — one `match` per dispatch.
 /// See `docs/16_AGENT.md` § Tool catalog for NCF rationale.
+///
+/// `Goodnight` is the explicit session-end signal. The model emits it
+/// as the very last tool of a session, and `run_agent` breaks the loop
+/// after dispatching it. Without an explicit terminator, small models
+/// (Qwen3-1.7B) struggle to ever emit a plain-text turn — they loop
+/// closing pleasantries indefinitely. NCF-aligned: closings should be
+/// *constructed*, not absent.
 #[derive(Debug, Clone, Copy)]
 pub enum Tool {
     Say,
     Listen,
     RingBell,
     Pause,
-    ListMeditations,
-    ReadMeditation,
+    ListSkills,
+    ReadSkill,
+    Goodnight,
 }
 
 impl Tool {
@@ -95,8 +103,9 @@ impl Tool {
             Self::Listen => "listen",
             Self::RingBell => "ring_bell",
             Self::Pause => "pause",
-            Self::ListMeditations => "list_meditations",
-            Self::ReadMeditation => "read_meditation",
+            Self::ListSkills => "list_skills",
+            Self::ReadSkill => "read_skill",
+            Self::Goodnight => "goodnight",
         }
     }
 
@@ -106,8 +115,9 @@ impl Tool {
             "listen" => Self::Listen,
             "ring_bell" => Self::RingBell,
             "pause" => Self::Pause,
-            "list_meditations" => Self::ListMeditations,
-            "read_meditation" => Self::ReadMeditation,
+            "list_skills" => Self::ListSkills,
+            "read_skill" => Self::ReadSkill,
+            "goodnight" => Self::Goodnight,
             _ => return None,
         })
     }
@@ -141,17 +151,21 @@ impl Tool {
                     "required": ["seconds"]
                 }),
             ),
-            Self::ListMeditations => (
-                "Return the names of available meditation templates.",
+            Self::ListSkills => (
+                "Return the names of available skill modules — meditation styles, inquiry, repair handling, etc. — that you can load on demand with read_skill().",
                 json!({ "type": "object", "properties": {} }),
             ),
-            Self::ReadMeditation => (
-                "Return the body of a named meditation template (use it as a stylistic exemplar; don't read it verbatim).",
+            Self::ReadSkill => (
+                "Read the body of a named skill module from prompts/agent_skills/ (e.g. 'loving_kindness', 'breath_awareness', 'inquiry', 'repair', 'jhana_qa'). Use as stylistic / structural guidance — paraphrase, don't quote verbatim.",
                 json!({
                     "type": "object",
-                    "properties": { "name": { "type": "string" } },
+                    "properties": { "name": { "type": "string", "description": "Skill module name without the .md extension." } },
                     "required": ["name"]
                 }),
+            ),
+            Self::Goodnight => (
+                "End the session. Call this as the VERY LAST tool, AFTER your final closing say()/ring_bell()/pause(). Calling goodnight() releases the session — the runtime stops processing your output. Do not call any other tools after goodnight().",
+                json!({ "type": "object", "properties": {} }),
             ),
         };
         ToolDef {
@@ -171,8 +185,9 @@ pub fn all_tool_defs() -> Vec<ToolDef> {
         Tool::Listen,
         Tool::RingBell,
         Tool::Pause,
-        Tool::ListMeditations,
-        Tool::ReadMeditation,
+        Tool::ListSkills,
+        Tool::ReadSkill,
+        Tool::Goodnight,
     ]
     .into_iter()
     .map(Tool::definition)
@@ -202,7 +217,7 @@ struct PauseArgs {
 }
 
 #[derive(Deserialize)]
-struct ReadMeditationArgs {
+struct ReadSkillArgs {
     name: String,
 }
 
@@ -222,7 +237,7 @@ pub struct AgentCtx {
     pub tts_tx: Sender<crate::tts::TtsCommand>,
     pub stt_tx: Sender<crate::stt::SttCommand>,
     pub stt_results: Arc<Mutex<Receiver<crate::stt::SttResult>>>,
-    pub meditations_dir: PathBuf,
+    pub skills_dir: PathBuf,
 }
 
 // ---------- Sentence buffer (vox-inspired) ----------
@@ -519,28 +534,34 @@ fn dispatch_tool(call: &ToolCall, ctx: &AgentCtx) -> Result<Value, AgentError> {
             std::thread::sleep(Duration::from_millis(ms));
             Ok(json!({ "status": "paused", "seconds": a.seconds }))
         }
-        Tool::ListMeditations => {
-            let mut names: Vec<String> = std::fs::read_dir(&ctx.meditations_dir)
-                .map_err(|e| AgentError::Tool(format!("list meditations: {e}")))?
+        Tool::ListSkills => {
+            let mut names: Vec<String> = std::fs::read_dir(&ctx.skills_dir)
+                .map_err(|e| AgentError::Tool(format!("list_skills: {e}")))?
                 .filter_map(|e| {
                     let name = e.ok()?.file_name().into_string().ok()?;
-                    name.strip_suffix(".txt").map(String::from)
+                    name.strip_suffix(".md").map(String::from)
                 })
                 .collect();
             names.sort();
             Ok(json!({ "names": names }))
         }
-        Tool::ReadMeditation => {
-            let a: ReadMeditationArgs = serde_json::from_str(args_str)
-                .map_err(|e| AgentError::Tool(format!("read_meditation args: {e}")))?;
-            // Constrain path to meditations dir — no path traversal.
+        Tool::ReadSkill => {
+            let a: ReadSkillArgs = serde_json::from_str(args_str)
+                .map_err(|e| AgentError::Tool(format!("read_skill args: {e}")))?;
+            // Constrain path to skills dir — no path traversal.
             if a.name.contains('/') || a.name.contains("..") {
-                return Err(AgentError::Tool("invalid meditation name".into()));
+                return Err(AgentError::Tool("invalid skill name".into()));
             }
-            let path = ctx.meditations_dir.join(format!("{}.txt", a.name));
+            let path = ctx.skills_dir.join(format!("{}.md", a.name));
             let body = std::fs::read_to_string(&path)
                 .map_err(|e| AgentError::Tool(format!("read {path:?}: {e}")))?;
             Ok(json!({ "body": body }))
+        }
+        Tool::Goodnight => {
+            // Dispatch is a no-op; the marker is the side effect.
+            // run_agent checks for goodnight by name after every
+            // dispatch and breaks the loop.
+            Ok(json!({ "status": "session_ended" }))
         }
     }
 }
@@ -618,6 +639,15 @@ pub fn run_agent(
                 snippet,
             });
             history.push(ChatMessage::tool_result(call.id.clone(), result_content));
+
+            // Explicit session-end signal — see Tool::Goodnight. Break
+            // the moment goodnight() dispatches so the model can't
+            // emit more closing-pleasantry turns after it.
+            if ok && call.function.name == "goodnight" {
+                info!("agent_loop: goodnight() — session ended explicitly");
+                let _ = events.send(AgentEvent::Done);
+                return Ok(());
+            }
         }
     }
 
@@ -675,8 +705,9 @@ mod tests {
             Tool::Listen,
             Tool::RingBell,
             Tool::Pause,
-            Tool::ListMeditations,
-            Tool::ReadMeditation,
+            Tool::ListSkills,
+            Tool::ReadSkill,
+            Tool::Goodnight,
         ] {
             assert_eq!(Tool::from_name(t.name()).map(|x| x.name()), Some(t.name()));
         }
