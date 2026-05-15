@@ -191,6 +191,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // this and pushes the integer count to Slint.
     let pause_state: Rc<RefCell<Option<(Instant, f32)>>> = Rc::new(RefCell::new(None));
 
+    // ring_bell() is fire-and-forget on the audio side (the TTS queue
+    // handles the WAV playback) — there's no ToolResult delay to
+    // wait on. So the "ringing" active_tool would linger forever.
+    // This auto-clears it after a short flash duration.
+    let bell_flash_until: Rc<RefCell<Option<Instant>>> = Rc::new(RefCell::new(None));
+
     // Periodic event-pump Timer (≈30 Hz). Drains AgentEvent +
     // ButtonEvent, mutates Slint properties.
     let event_timer = slint::Timer::default();
@@ -205,6 +211,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let button_rx_for_timer = button_rx;
     let agent_rx_for_timer = agent_rx.clone();
     let pause_state_for_timer = pause_state.clone();
+    let bell_flash_for_timer = bell_flash_until.clone();
 
     event_timer.start(
         slint::TimerMode::Repeated,
@@ -248,6 +255,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+            }
+
+            // Bell flash auto-clear: ring_bell doesn't have a meaningful
+            // ToolResult delay, so we time-bound the "ringing" state.
+            if let Some(deadline) = *bell_flash_for_timer.borrow()
+                && Instant::now() >= deadline
+            {
+                if window.get_active_tool() == slint::SharedString::from("ringing") {
+                    window.set_active_tool("".into());
+                }
+                *bell_flash_for_timer.borrow_mut() = None;
             }
 
             // Tick the pause countdown if one is in flight.
@@ -304,6 +322,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             "ring_bell" => {
                                 window.set_active_tool("ringing".into());
+                                *bell_flash_for_timer.borrow_mut() =
+                                    Some(Instant::now() + std::time::Duration::from_millis(900));
                             }
                             _ => {}
                         }
