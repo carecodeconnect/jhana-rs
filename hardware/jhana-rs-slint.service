@@ -20,6 +20,10 @@ Environment=SLINT_BACKEND=linuxkms
 # Try femtovg (GL ES via Panfrost) first, fall back to software.
 # Both are compiled in; Slint picks based on what initialises cleanly.
 Environment=SLINT_RENDERER=femtovg
+# Slint linuxkms ignores the kernel's fbcon rotate= flag — it talks
+# DRM directly. Rotation needs to be set here for the panel to come
+# up in portrait. 90 = clockwise 90° from the panel's native landscape.
+Environment=SLINT_KMS_ROTATION=90
 Environment=RUST_LOG=info
 StandardInput=null
 StandardOutput=journal
