@@ -307,6 +307,45 @@ This is a meaningful detour. Worth doing once the Rust pipeline
 (STT + LLM + TTS + display + hardware buttons) is fully working and
 stable end-to-end so the pi adaptation is a layer, not a rewrite.
 
+#### Outcome (2026-05-15): pivoted to bespoke Rust agent loop
+
+Pi was installed on the Rock (Node 20.20.2 + `@earendil-works/pi-coding-agent`
+0.74.0) and wired against `jhana-llm-server` via `~/.pi/agent/models.json`.
+The wiring worked in both directions — pi reached the shim, the shim
+returned valid OpenAI-shape responses — but **three structural mismatches**
+made pi a poor fit for a meditation guide:
+
+1. **Pi ships four built-in tools** (`read`, `write`, `edit`, `bash`) that
+   are coded into the binary and cannot be disabled. Every request from
+   pi included these four tools regardless of our system prompt. A
+   meditation guide model with `bash()` in its tool catalog is a
+   compounding risk surface — one mis-prompt and the model is shelling
+   out commands instead of guiding breath.
+2. **Pi's TUI is a coding-agent surface** — file diffs, `$ command`
+   blocks, tool-execution traces. We were already planning to render the
+   meditation through `ratatui` (per docs/15_INTERACTION.md design) and
+   use pi headlessly, at which point pi is just a tool-call orchestrator
+   with an unwanted built-in tool surface.
+3. **Empty-content normalization quirk.** In `--mode json`, pi returned
+   `{"role":"assistant","content":[],"usage":{"output":0}}` despite the
+   shim returning valid text. Pi normalizes assistant content into the
+   array form `[{"type":"text","text":"..."}]` and our string return
+   didn't survive that pass cleanly. Fixable, but it was the third
+   symptom in a row.
+
+We kept the `jhana-llm-server` HTTP shim — it works correctly with raw
+curl and is useful as a standalone debug/external-API endpoint. The pi
+install scripts and `config/pi-models.json` stay in-tree as a record of
+the attempt.
+
+**What we adopted instead:** a bespoke Rust agent loop inside the
+`jhana-rs` binary that holds the conversation history, calls
+`rkllm-rs` directly (no HTTP), parses `<tool_call>` blocks from model
+output, and dispatches to the existing `tts.rs` / `stt.rs` modules.
+Roughly the same total LoC as a pi extension would have been (~150
+Rust vs ~80 TypeScript + HTTP audio endpoints), but pure Rust, no Node,
+exactly our tool catalog, no surprise tools. See the `agent-rs` branch.
+
 ### Interaction design: Moore's Natural Conversation Framework
 
 The conversational UX for jhana-rs is designed against **Robert J.

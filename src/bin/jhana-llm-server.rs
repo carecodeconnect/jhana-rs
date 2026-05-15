@@ -79,15 +79,53 @@ struct ChatCompletionRequest {
 #[derive(Debug, Deserialize)]
 struct ChatMessage {
     role: String,
+    /// OpenAI accepts two shapes here: a plain string, or an array of
+    /// content parts like `[{"type":"text","text":"..."}, ...]` (the
+    /// multimodal/structured form pi and recent clients use). We accept
+    /// both via an untagged enum, then flatten down to a single string
+    /// because Qwen3-1.7B is text-only and we don't render images.
     /// May be missing on assistant turns that only contain tool_calls.
     #[serde(default)]
-    content: Option<String>,
+    content: Option<MessageContent>,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
     tool_call_id: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum MessageContent {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+#[derive(Debug, Deserialize)]
+struct ContentPart {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: Option<String>,
+    // image_url / input_audio / etc — ignored for text-only Qwen.
+}
+
+impl MessageContent {
+    /// Flatten to a single string. Array form concatenates all
+    /// `{type: "text"}` parts and drops anything else (images,
+    /// tool_use blocks, etc.) — fine for a text-only model.
+    fn as_text(&self) -> String {
+        match self {
+            Self::Text(s) => s.clone(),
+            Self::Parts(parts) => parts
+                .iter()
+                .filter(|p| p.kind == "text")
+                .filter_map(|p| p.text.as_deref())
+                .collect::<Vec<_>>()
+                .join(""),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -169,7 +207,7 @@ fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
     let user_system = messages
         .iter()
         .find(|m| m.role == "system")
-        .and_then(|m| m.content.clone())
+        .and_then(|m| m.content.as_ref().map(MessageContent::as_text))
         .unwrap_or_else(|| "You are a helpful assistant.".to_string());
 
     out.push_str("<|im_start|>system\n");
@@ -194,14 +232,14 @@ fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
             "user" => {
                 out.push_str("<|im_start|>user\n");
                 if let Some(c) = &m.content {
-                    out.push_str(c);
+                    out.push_str(&c.as_text());
                 }
                 out.push_str("<|im_end|>\n");
             }
             "assistant" => {
                 out.push_str("<|im_start|>assistant\n");
                 if let Some(c) = &m.content {
-                    out.push_str(c);
+                    out.push_str(&c.as_text());
                 }
                 // If the assistant turn contained tool_calls (continuing
                 // a multi-turn conversation), serialise them back as
@@ -229,7 +267,7 @@ fn render_qwen_prompt(messages: &[ChatMessage], tools: &[ToolDef]) -> String {
                 // template — they identify the call by name/id.
                 out.push_str("<|im_start|>user\n<tool_response>\n");
                 if let Some(c) = &m.content {
-                    out.push_str(c);
+                    out.push_str(&c.as_text());
                 }
                 let _ = (&m.name, &m.tool_call_id); // already serialised in content per OpenAI convention
                 out.push_str("\n</tool_response><|im_end|>\n");

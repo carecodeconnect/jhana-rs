@@ -90,6 +90,48 @@ sudo ldconfig
 See [docs/05_NPU.md](docs/05_NPU.md) for full NPU setup, model downloads,
 and build steps.
 
+### Agent harness — pi attempt (historical)
+
+> Pi was evaluated as the agent harness and **pivoted away from** on
+> 2026-05-15 in favour of a bespoke Rust agent loop. See
+> [docs/10_SPECS.md § Outcome](docs/10_SPECS.md#outcome-2026-05-15-pivoted-to-bespoke-rust-agent-loop)
+> for the reasoning (built-in coding tools we couldn't disable; TUI
+> mismatch; content-shape quirks). The install instructions below are
+> preserved so anyone reviewing that decision can reproduce the setup,
+> and because the `jhana-llm-server` HTTP shim is still useful for
+> external clients. Skip this section for normal use.
+
+Node 20 + npm via NodeSource (the apt-shipped `nodejs` is too old for pi):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node --version    # → v20.x
+npm --version     # → 10.x
+```
+
+Pi via npm with a **user-writable global prefix** (avoids the `/usr/lib/node_modules`
+EACCES that pi's curl-installer trips into, and keeps `sudo` out of global npm):
+
+```bash
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+grep -q '.npm-global/bin' ~/.bashrc || echo 'export PATH=$HOME/.npm-global/bin:$PATH' >> ~/.bashrc
+npm install -g @earendil-works/pi-coding-agent
+~/.npm-global/bin/pi --version
+```
+
+After this, `pi` is on `$PATH` in new shells. The pi.dev curl-installer (`curl
+-fsSL https://pi.dev/install.sh | sh`) does the same thing but defaults to
+`sudo npm install -g`, which works but taints `/usr/lib/node_modules/` with
+root permissions and creates EACCES issues for every subsequent global npm
+install. The user-prefix approach above is what `pi_sandbox/docs/06-troubleshooting.md`
+recommends.
+
+See [docs/15_INTERACTION.md](docs/15_INTERACTION.md) for the agent harness
+design and tool catalog, and [docs/10_SPECS.md § pi as agent harness](docs/10_SPECS.md)
+for why pi vs alternatives.
+
 ### Package summary
 
 | Package | Where | Purpose |
@@ -107,6 +149,8 @@ and build steps.
 | `sshpass` | X61s | Non-interactive SSH password for scripts |
 | `librknnrt.so` | Rock | RKNN NPU runtime (v2.2.0, from rknn-toolkit2) |
 | `rknn_api.h` | Rock | RKNN C headers for sherpa-onnx RKNN build |
+| `nodejs` (NodeSource 20.x) | Rock | Runtime for the `pi` agent harness — **pi-port branch only** |
+| `@earendil-works/pi-coding-agent` | Rock (npm global, user prefix) | The `pi` CLI itself — **pi-port branch only** |
 
 ## Building
 

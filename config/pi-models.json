@@ -1,0 +1,20 @@
+{
+  "providers": {
+    "jhana-rs": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "not-needed",
+      "models": [
+        {
+          "id": "qwen3-1.7b",
+          "name": "Qwen3-1.7B on RK3588 NPU (jhana-rs)",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 4096,
+          "maxTokens": 1024,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
