@@ -39,8 +39,9 @@ use crate::ui::{App, AppState, render};
 // Welcome lines now come from config/jhana.json → ui.welcome_lines so
 // you can edit the greeting without recompiling. See src/config.rs.
 
-/// Default meditation type loaded on startup.
-const DEFAULT_MEDITATION: &str = "test";
+// Default meditation type now lives in config/jhana.json
+// (ui.default_meditation). Edit + restart to switch the few-shot
+// example shown to the LLM — no recompile.
 
 fn main() -> io::Result<()> {
     // File logger — all output goes to jhana-rs.log, not stdout/tty
@@ -218,7 +219,7 @@ fn run_loop(
                     app.reset();
                     app.push_console(format!("You said: {text}"));
                     // Feed transcription to LLM as the user prompt
-                    match llm::load_prompts(DEFAULT_MEDITATION) {
+                    match llm::load_prompts(&config::get().ui.default_meditation) {
                         Ok((system, _user)) => {
                             app.start_generating();
                             // Use the transcribed text as the user prompt
