@@ -26,21 +26,20 @@ PIPER_MODEL=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medi
 PIPER_CONFIG=/home/ubuntu/models/vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx.json
 
 echo "==> Generating spoken cues + chime via espeak-ng + ffmpeg..."
-# The onboard Uctronics speaker has a physical loudness ceiling that the
-# 3-bit codec gain selector barely budges (the original AI in a Box
-# relied on PulseAudio software gain that we don't have in raw aplay).
-# We approximate it with `volume=20dB,alimiter` so peaks compress instead
-# of clip hard — the small speaker reads that as "louder". The speaker
-# is also heavily peaked around 1–2 kHz, so cues should be spoken or
-# tuned to that band.
-LOUD='volume=20dB,alimiter=limit=0.95'
+# Cue loudness: the previous setting (+20 dB + alimiter on espeak -a 200)
+# was distorted. The original AI in a Box doesn't software-amplify; it
+# routes Piper through PulseAudio at sink-volume 100% and even
+# *attenuates* TTS by volume/100 (tts.py:90-91, default ~8 %). Without
+# PA we can't replicate that exactly, but for clean audible cues we
+# just need a small boost — about +6 dB with no limiter.
+LOUD='volume=6dB'
 
 # Spoken cue ("Speak now") via espeak-ng so the user hears it from the
 # Rock itself, not just on the dev-machine stdout. Same for "Stop".
-# Resample to the codec's native 48 kHz and pump through the limiter.
 gen_speech() {
   local text="$1" out="$2" tmp="${out}.raw.wav"
-  espeak-ng -a 200 -s 150 -w "$tmp" "$text" >/dev/null 2>&1
+  # `-a 150` is moderate amplitude; -s 145 is a calm meditation-friendly pace.
+  espeak-ng -a 150 -s 145 -w "$tmp" "$text" >/dev/null 2>&1
   ffmpeg -y -hide_banner -loglevel error \
     -i "$tmp" -af "$LOUD" -ar 48000 -ac 1 -sample_fmt s16 "$out"
   rm -f "$tmp"
