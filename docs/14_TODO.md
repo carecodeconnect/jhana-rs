@@ -474,6 +474,25 @@ Rust NPU TTS is too complex.
 (OpenAI-compatible). Runs Piper ONNX encoder + RKNN decoder. Backup
 option — useful if already running RKLLama for LLM.
 
+#### Option E: Supertonic (ONNX, replace Piper entirely)
+
+[supertone-inc/supertonic](https://github.com/supertone-inc/supertonic)
+— "Lightning-Fast, On-Device, Multilingual TTS" running natively via
+ONNX. ~99M params (vs 0.7B–2B class open TTS), 31-language support as
+of Supertonic 3 (2026-04-29). Small download, fast startup, on-device
+inference. Could replace the Piper stack entirely instead of chasing
+NPU acceleration for Piper VITS.
+
+Related repos worth scoping:
+- [supertonic-py](https://github.com/supertone-inc/supertonic-py) — Python SDK reference for the inference pipeline
+- [sameert89/supertonic-tts-openai](https://github.com/sameert89/supertonic-tts-openai) — existing Rust OpenAI-compatible wrapper, prior art for Rust integration
+- [Supertone/supertonic on HF](https://huggingface.co/Supertone/supertonic) — ONNX model weights
+
+- [ ] Evaluate Supertonic vs Piper on Rock: voice quality (meditation pace), RTF, RAM
+- [ ] Check ONNX runtime compatibility with sensevoice-rs (avoid protobuf clash repeat)
+- [ ] Investigate RKNN conversion path for Supertonic ONNX → NPU
+- [ ] Decide: replace Piper stack (Options A–D) or keep as separate engine choice
+
 ### Vision: pure Rust NPU pipeline
 
 The end state for jhana-rs is a fully Rust, fully NPU pipeline:

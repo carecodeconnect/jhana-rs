@@ -98,6 +98,7 @@ iterations, not zero audio input.)
 | [`kitten_tts_rs`](https://github.com/second-state/kitten_tts_rs) v0.2.2 | ONNX Runtime | Confirmed | 288 | 8 voices, 8-9x RT, ~10 MB binary. Best edge fixed-voice TTS. |
 | [`kokoros`](https://github.com/lucasjinreal/Kokoros) | ONNX | — | 769 | StyleTTS2, preset voice styles, OpenAI API. |
 | [`kokoroxide`](https://crates.io/crates/kokoroxide) | ONNX Runtime | — | — | espeak-ng phonemizer. |
+| [`supertonic`](https://github.com/supertone-inc/supertonic) | ONNX Runtime | Likely (ONNX) | — | Supertonic 3 (2026-04-29). ~99M params, 31 languages, voice style embeddings. [Rust wrapper exists](https://github.com/sameert89/supertonic-tts-openai). Candidate to replace Piper. |
 | Piper CLI / piper-rs | ONNX / C++ | Native binary | — | Current stopgap. Fixed voices, no cloning. |
 
 ### Not viable
@@ -129,6 +130,7 @@ iterations, not zero audio input.)
 | Piper RKNN decoders | [danielferr85](https://huggingface.co/danielferr85/piper-checkpoints-rknn) | No | Yes | Pre-converted |
 | MMS-TTS + RKNN | [RKLLama](https://github.com/NotPunchnox/rkllama) | No | Yes | Good |
 | F5-TTS RKNN | [happyme531](https://huggingface.co/happyme531/F5-TTS-RKNN2) | Yes | Partial | 39x RT (too slow) |
+| Supertonic ONNX → RKNN | [supertone-inc/supertonic](https://github.com/supertone-inc/supertonic) | Style embeddings | Unknown — needs ONNX→RKNN conversion attempt | CPU baseline already fast (~99M params) |
 | Any ONNX via `ort` | [ort](https://crates.io/crates/ort) crate | Depends | CPU only | No RKNN routing |
 
 No Rust crate currently wraps `librknnrt.so` for TTS inference directly.
